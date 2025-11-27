@@ -17,15 +17,7 @@
       "transport": {
         "type": "stdio"
       },
-      "environment_variables": [
-        {
-          "description": "OpenAI API Key for Codex CLI",
-          "is_required": true,
-          "format": "string",
-          "is_secret": true,
-          "name": "OPENAI_API_KEY"
-        }
-      ]
+      "environment_variables": []
     }
   ]
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"codex4kilomcp/internal/codex"
 
@@ -57,8 +58,8 @@ Edge Cases & Best Practices:
 - For most repos, prefer "read-only" to avoid accidental changes.
 - If needed, set 'return_all_messages' to True to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).`,
 		Meta: mcp.Meta{
-			Version: "0.0.0",
-			Author:  "guda.studio",
+			"version": "0.0.0",
+			"author":  "guda.studio",
 		},
 	}
 
@@ -88,6 +89,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	if input.Sandbox == "" {
 		input.Sandbox = "read-only"
 	}
+	input.SessionID = strings.TrimSpace(input.SessionID)
 	skipGitRepoCheck := true
 	if input.SkipGitRepoCheck != nil {
 		skipGitRepoCheck = *input.SkipGitRepoCheck
@@ -122,7 +124,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 
 	// Check if execution was successful
 	if !result.Success {
-		return nil, CodexOutput{}, fmt.Errorf(result.Error)
+		return nil, CodexOutput{}, fmt.Errorf("%s", result.Error)
 	}
 
 	// Prepare the response

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -33,8 +34,17 @@ type Result struct {
 
 // Run executes the Codex CLI with the given options and returns the result
 func Run(opts Options) (*Result, error) {
+	prompt := opts.Prompt
+	if runtime.GOOS == "windows" {
+		prompt = escapePrompt(prompt)
+	}
+	sandbox := opts.Sandbox
+	if sandbox == "" {
+		sandbox = "read-only"
+	}
+
 	// Build the base command
-	cmd := exec.Command("codex", "exec", "--sandbox", opts.Sandbox, "--cd", opts.WorkingDir, "--json")
+	cmd := exec.Command("codex", "exec", "--sandbox", sandbox, "--cd", opts.WorkingDir, "--json")
 
 	// Add optional flags
 	if len(opts.ImagePaths) > 0 {
@@ -59,13 +69,15 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	// Add the prompt at the end
-	cmd.Args = append(cmd.Args, "--", opts.Prompt)
+	cmd.Args = append(cmd.Args, "--", prompt)
 
 	// Capture stdout and stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
+	// Combine stderr into stdout so we surface all messages
+	cmd.Stderr = cmd.Stdout
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
@@ -114,7 +126,9 @@ func Run(opts Options) (*Result, error) {
 		// Check for errors
 		if lineType, ok := lineData["type"].(string); ok {
 			if strings.Contains(lineType, "fail") || strings.Contains(lineType, "error") {
-				result.Success = false
+				if result.AgentMessages == "" {
+					result.Success = false
+				}
 				if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
 					if msg, ok := errMsg["message"].(string); ok {
 						result.Error = "codex error: " + msg
@@ -123,6 +137,13 @@ func Run(opts Options) (*Result, error) {
 					result.Error = "codex error: " + msg
 				}
 			}
+		}
+	}
+
+	if scanErr := scanner.Err(); scanErr != nil {
+		result.Success = false
+		if result.Error == "" {
+			result.Error = fmt.Sprintf("failed to read codex output: %v", scanErr)
 		}
 	}
 
@@ -145,4 +166,19 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	return result, nil
+}
+
+// escapePrompt mirrors the Python implementation to avoid Windows shell quoting issues.
+func escapePrompt(prompt string) string {
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		"\"", "\\\"",
+		"\n", "\\n",
+		"\r", "\\r",
+		"\t", "\\t",
+		"\b", "\\b",
+		"\f", "\\f",
+		"'", "\\'",
+	)
+	return replacer.Replace(prompt)
 }

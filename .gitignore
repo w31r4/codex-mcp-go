@@ -43,3 +43,4 @@ Thumbs.db
 # MCP Registry Token
 .mcpregistry_registry_token
 .mcpregistry_github_token
+RELEASE_GUIDE.md

@@ -1,4 +1,4 @@
-module codex-mcp-go
+module github.com/w31r4/codex-mcp-go
 
 go 1.24.5
 

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"codex-mcp-go/internal/codex"
+	"github.com/w31r4/codex-mcp-go/internal/codex"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

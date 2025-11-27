@@ -28,25 +28,39 @@
 
 ## 快速开始
 
-### 1. 构建
+### 1. 安装
+
+#### 方式一：使用 npx (推荐)
+
+无需安装 Go 环境，直接运行：
+
+```bash
+npx @w31r4/codex-mcp-go
+```
+
+#### 方式二：手动下载
+
+从 [Releases](https://github.com/w31r4/codex-mcp-go/releases) 页面下载对应平台的二进制文件。
+
+#### 方式三：源码构建
 
 需要 Go 1.24+ 环境。
 
 ```bash
-git clone https://github.com/your-repo/codex-mcp-go.git
+git clone https://github.com/w31r4/codex-mcp-go.git
 cd codex-mcp-go
 go build -o codex-mcp-go cmd/server/main.go
 ```
 
 ### 2. 配置 MCP 客户端
 
-根据您使用的 AI 客户端，选择对应的配置方式。请将 `/path/to/codex-mcp-go` 替换为实际的绝对路径。
+根据您使用的 AI 客户端，选择对应的配置方式。
 
 <details>
 <summary><strong>Claude Code</strong></summary>
 
 ```bash
-claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
+claude mcp add codex -s user --transport stdio -- npx -y @w31r4/codex-mcp-go
 ```
 </details>
 
@@ -59,9 +73,11 @@ claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex-mcp-go",
-      "args": [],
-      "env": {}
+      "command": "npx",
+      "args": ["-y", "@w31r4/codex-mcp-go"],
+      "env": {
+        "OPENAI_API_KEY": "your-api-key"
+      }
     }
   }
 }
@@ -81,9 +97,11 @@ claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex-mcp-go",
-      "args": [],
-      "env": {}
+      "command": "npx",
+      "args": ["-y", "@w31r4/codex-mcp-go"],
+      "env": {
+        "OPENAI_API_KEY": "your-api-key"
+      }
     }
   }
 }
@@ -98,7 +116,8 @@ claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
 3. 填写配置：
    - Name: `codex`
    - Type: `stdio`
-   - Command: `/path/to/codex-mcp-go`
+   - Command: `npx`
+   - Args: `-y @w31r4/codex-mcp-go`
 </details>
 
 <details>
@@ -110,9 +129,11 @@ claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex-mcp-go",
-      "args": [],
-      "env": {}
+      "command": "npx",
+      "args": ["-y", "@w31r4/codex-mcp-go"],
+      "env": {
+        "OPENAI_API_KEY": "your-api-key"
+      }
     }
   }
 }

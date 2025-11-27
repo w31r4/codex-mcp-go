@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.w31r4/codex-mcp-go",
+  "description": "An MCP server that wraps the OpenAI Codex CLI, enabling AI clients to execute code in a sandboxed environment.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/w31r4/codex-mcp-go",
+    "source": "github"
+  },
+  "version": "0.0.1",
+  "packages": [
+    {
+      "registry_type": "npm",
+      "registry_base_url": "https://registry.npmjs.org",
+      "identifier": "@w31r4/codex-mcp-go",
+      "version": "0.0.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environment_variables": [
+        {
+          "description": "OpenAI API Key for Codex CLI",
+          "is_required": true,
+          "format": "string",
+          "is_secret": true,
+          "name": "OPENAI_API_KEY"
+        }
+      ]
+    }
+  ]
+}

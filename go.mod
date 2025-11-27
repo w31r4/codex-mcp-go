@@ -1,4 +1,4 @@
-module codex4kilomcp
+module codex-mcp-go
 
 go 1.24.5
 

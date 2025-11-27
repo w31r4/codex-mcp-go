@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	server "codex4kilomcp/internal/mcp"
+	server "codex-mcp-go/internal/mcp"
 )
 
 func main() {

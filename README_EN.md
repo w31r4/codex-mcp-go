@@ -39,11 +39,11 @@ Please ensure you have **installed** and **configured** the following tools:
 
 ```bash
 # Clone repository
-git clone https://github.com/your-repo/codex4kilomcp.git
-cd codex4kilomcp
+git clone https://github.com/your-repo/codex-mcp-go.git
+cd codex-mcp-go
 
 # Build binary
-go build -o codex4kilomcp cmd/server/main.go
+go build -o codex-mcp-go cmd/server/main.go
 ```
 
 #### 1.2 Configure MCP Client
@@ -58,13 +58,13 @@ Choose the configuration method based on your AI client:
 claude mcp remove codex
 
 # Add Codex4KiloMCP
-claude mcp add codex -s user --transport stdio -- /path/to/codex4kilomcp
+claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
 ```
 
 Verify installation:
 ```bash
 claude mcp list
-# Should display: codex: /path/to/codex4kilomcp - ✓ Connected
+# Should display: codex: /path/to/codex-mcp-go - ✓ Connected
 ```
 
 </details>
@@ -78,7 +78,7 @@ Add to Roo Code's MCP configuration:
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex4kilomcp",
+      "command": "/path/to/codex-mcp-go",
       "args": [],
       "env": {}
     }
@@ -101,7 +101,7 @@ Add to KiloCode's MCP configuration:
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex4kilomcp",
+      "command": "/path/to/codex-mcp-go",
       "args": [],
       "env": {}
     }
@@ -122,7 +122,7 @@ Generic configuration format:
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex4kilomcp",
+      "command": "/path/to/codex-mcp-go",
       "args": [],
       "env": {}
     }
@@ -137,7 +137,7 @@ Generic configuration format:
 Test MCP server with:
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | /path/to/codex4kilomcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | /path/to/codex-mcp-go
 ```
 
 Should return available tools list containing `codex` tool.
@@ -233,7 +233,7 @@ Second turn (using returned SESSION_ID):
 
 ## 5. Go Version vs Python Version
 
-| Feature | Go Version (codex4kilomcp) | Python Version (codexmcp) |
+| Feature | Go Version (codex-mcp-go) | Python Version (codexmcp) |
 |---------|---------------------------|---------------------------|
 | **Core Features** | ✅ Full support | ✅ Full support |
 | **Session Persistence** | ✅ Supported | ✅ Supported |
@@ -262,8 +262,8 @@ Second turn (using returned SESSION_ID):
 **Solution**:
 1. Check if codex is installed: `which codex`
 2. Check Go version: `go version` (requires 1.24+)
-3. Check binary permissions: `chmod +x codex4kilomcp`
-4. Manual test: `./codex4kilomcp`
+3. Check binary permissions: `chmod +x codex-mcp-go`
+4. Manual test: `./codex-mcp-go`
 
 ### Issue 2: Codex Command Execution Failed
 
@@ -308,7 +308,7 @@ export CODEX4KILOMCP_TIMEOUT=300
 
 ### Configuration File Example
 
-Create `~/.codex4kilomcp/config.toml`:
+Create `~/.codex-mcp-go/config.toml`:
 
 ```toml
 [server]
@@ -328,7 +328,7 @@ return_all_messages = false
 ### Project Structure
 
 ```
-codex4kilomcp/
+codex-mcp-go/
 ├── cmd/server/         # Main program entry
 ├── internal/
 │   ├── mcp/           # MCP server implementation
@@ -341,8 +341,8 @@ codex4kilomcp/
 
 ```bash
 # Clone repository
-git clone https://github.com/your-repo/codex4kilomcp.git
-cd codex4kilomcp
+git clone https://github.com/your-repo/codex-mcp-go.git
+cd codex-mcp-go
 
 # Install dependencies
 go mod download
@@ -351,7 +351,7 @@ go mod download
 go test ./...
 
 # Build
-go build -o codex4kilomcp cmd/server/main.go
+go build -o codex-mcp-go cmd/server/main.go
 ```
 
 ### Contribution Guidelines

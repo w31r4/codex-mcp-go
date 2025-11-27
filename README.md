@@ -39,11 +39,11 @@ Codex4KiloMCP 是一个基于 Go 语言实现的 MCP (Model Context Protocol) �
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/codex4kilomcp.git
-cd codex4kilomcp
+git clone https://github.com/your-repo/codex-mcp-go.git
+cd codex-mcp-go
 
 # 构建二进制文件
-go build -o codex4kilomcp cmd/server/main.go
+go build -o codex-mcp-go cmd/server/main.go
 ```
 
 #### 1.2 配置 MCP 客户端
@@ -58,13 +58,13 @@ go build -o codex4kilomcp cmd/server/main.go
 claude mcp remove codex
 
 # 添加 Codex4KiloMCP
-claude mcp add codex -s user --transport stdio -- /path/to/codex4kilomcp
+claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
 ```
 
 验证安装：
 ```bash
 claude mcp list
-# 应显示: codex: /path/to/codex4kilomcp - ✓ Connected
+# 应显示: codex: /path/to/codex-mcp-go - ✓ Connected
 ```
 
 </details>
@@ -78,7 +78,7 @@ claude mcp list
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex4kilomcp",
+      "command": "/path/to/codex-mcp-go",
       "args": [],
       "env": {}
     }
@@ -101,7 +101,7 @@ claude mcp list
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex4kilomcp",
+      "command": "/path/to/codex-mcp-go",
       "args": [],
       "env": {}
     }
@@ -122,7 +122,7 @@ claude mcp list
 {
   "mcpServers": {
     "codex": {
-      "command": "/path/to/codex4kilomcp",
+      "command": "/path/to/codex-mcp-go",
       "args": [],
       "env": {}
     }
@@ -137,7 +137,7 @@ claude mcp list
 运行以下命令测试 MCP 服务器：
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | /path/to/codex4kilomcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | /path/to/codex-mcp-go
 ```
 
 应返回可用的工具列表，包含 `codex` 工具。
@@ -233,7 +233,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | /path/to/cod
 
 ## 五、Go 版本 vs Python 版本
 
-| 特性 | Go 版本 (codex4kilomcp) | Python 版本 (codexmcp) |
+| 特性 | Go 版本 (codex-mcp-go) | Python 版本 (codexmcp) |
 |------|------------------------|----------------------|
 | **核心功能** | ✅ 完整支持 | ✅ 完整支持 |
 | **会话持久化** | ✅ 支持 | ✅ 支持 |
@@ -262,8 +262,8 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | /path/to/cod
 **解决方案**：
 1. 检查 codex 是否已安装：`which codex`
 2. 检查 Go 版本：`go version`（需要 1.24+）
-3. 检查二进制文件权限：`chmod +x codex4kilomcp`
-4. 手动测试：`./codex4kilomcp`
+3. 检查二进制文件权限：`chmod +x codex-mcp-go`
+4. 手动测试：`./codex-mcp-go`
 
 ### 问题 2：Codex 命令执行失败
 
@@ -308,7 +308,7 @@ export CODEX4KILOMCP_TIMEOUT=300
 
 ### 配置文件示例
 
-创建 `~/.codex4kilomcp/config.toml`：
+创建 `~/.codex-mcp-go/config.toml`：
 
 ```toml
 [server]
@@ -328,7 +328,7 @@ return_all_messages = false
 ### 项目结构
 
 ```
-codex4kilomcp/
+codex-mcp-go/
 ├── cmd/server/         # 主程序入口
 ├── internal/
 │   ├── mcp/           # MCP 服务器实现
@@ -341,8 +341,8 @@ codex4kilomcp/
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/codex4kilomcp.git
-cd codex4kilomcp
+git clone https://github.com/your-repo/codex-mcp-go.git
+cd codex-mcp-go
 
 # 安装依赖
 go mod download
@@ -351,7 +351,7 @@ go mod download
 go test ./...
 
 # 构建
-go build -o codex4kilomcp cmd/server/main.go
+go build -o codex-mcp-go cmd/server/main.go
 ```
 
 ### 提交规范

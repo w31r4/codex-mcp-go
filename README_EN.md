@@ -33,7 +33,7 @@ Key Features:
 Requires Go 1.24+.
 
 ```bash
-git clone https://github.com/your-repo/codex-mcp-go.git
+git clone https://github.com/w31r4/codex-mcp-go.git
 cd codex-mcp-go
 go build -o codex-mcp-go cmd/server/main.go
 ```

@@ -21,7 +21,8 @@
   "homepage": "https://github.com/w31r4/codex-mcp-go#readme",
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
   },
   "dependencies": {
     "axios": "^1.7.9",

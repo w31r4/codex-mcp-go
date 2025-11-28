@@ -204,6 +204,8 @@ This project is licensed under the [MIT License](./LICENSE).
 
 This project is heavily inspired by [codexmcp](https://github.com/GuDaStudio/codexmcp) (Python implementation). Thanks to the GuDaStudio team for their pioneering work in exploring Codex MCP integration.
 
+Codex's capabilities in detail and bug fixing are evident to all, but sometimes it feels slightly lacking in global perspective. Therefore, my current workflow uses Gemini 3.0 Pro's KiloCode as the main planner, while Codex can be responsible for the implementation of complex functions and bug fixing.
+
 ---
 
 <div align="center">

@@ -2,8 +2,12 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -32,8 +36,13 @@ type Result struct {
 	Error         string
 }
 
-// Run executes the Codex CLI with the given options and returns the result
-func Run(opts Options) (*Result, error) {
+// Run executes the Codex CLI with the given options and returns the result.
+// If ctx is canceled (e.g. client disconnects), the codex process is killed.
+func Run(ctx context.Context, opts Options) (*Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	prompt := opts.Prompt
 	if runtime.GOOS == "windows" {
 		prompt = escapePrompt(prompt)
@@ -44,7 +53,7 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	// Build the base command
-	cmd := exec.Command("codex", "exec", "--sandbox", sandbox, "--cd", opts.WorkingDir, "--json")
+	cmd := exec.CommandContext(ctx, "codex", "exec", "--sandbox", sandbox, "--cd", opts.WorkingDir, "--json")
 
 	// Add optional flags
 	if len(opts.ImagePaths) > 0 {
@@ -90,66 +99,75 @@ func Run(opts Options) (*Result, error) {
 		AllMessages: make([]map[string]interface{}, 0),
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-
-		var lineData map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &lineData); err != nil {
-			result.Success = false
-			result.Error = fmt.Sprintf("JSON parse error: %v. Line: %s", err, line)
-			break
-		}
-
-		// Collect all messages if requested
-		if opts.ReturnAllMessages {
-			result.AllMessages = append(result.AllMessages, lineData)
-		}
-
-		// Extract thread_id
-		if threadID, ok := lineData["thread_id"].(string); ok && threadID != "" {
-			result.SessionID = threadID
-		}
-
-		// Extract agent messages
-		if item, ok := lineData["item"].(map[string]interface{}); ok {
-			if itemType, ok := item["type"].(string); ok && itemType == "agent_message" {
-				if text, ok := item["text"].(string); ok {
-					result.AgentMessages += text
-				}
-			}
-		}
-
-		// Check for errors
-		if lineType, ok := lineData["type"].(string); ok {
-			if strings.Contains(lineType, "fail") || strings.Contains(lineType, "error") {
-				if result.AgentMessages == "" {
+	reader := bufio.NewReader(stdout)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) > 0 {
+			var lineData map[string]interface{}
+			if err := json.Unmarshal(trimmed, &lineData); err != nil {
+				// Keep draining output to avoid blocking the codex process.
+				if result.Error == "" {
 					result.Success = false
+					result.Error = fmt.Sprintf("JSON parse error: %v. Line: %s", err, string(trimmed))
 				}
-				if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
-					if msg, ok := errMsg["message"].(string); ok {
-						result.Error = "codex error: " + msg
+			} else {
+				// Collect all messages if requested
+				if opts.ReturnAllMessages {
+					result.AllMessages = append(result.AllMessages, lineData)
+				}
+
+				// Extract thread_id
+				if threadID, ok := lineData["thread_id"].(string); ok && threadID != "" {
+					result.SessionID = threadID
+				}
+
+				// Extract agent messages
+				if item, ok := lineData["item"].(map[string]interface{}); ok {
+					if itemType, ok := item["type"].(string); ok && itemType == "agent_message" {
+						if text, ok := item["text"].(string); ok {
+							result.AgentMessages += text
+						}
 					}
-				} else if msg, ok := lineData["message"].(string); ok {
-					result.Error = "codex error: " + msg
+				}
+
+				// Check for errors
+				if lineType, ok := lineData["type"].(string); ok {
+					if strings.Contains(lineType, "fail") || strings.Contains(lineType, "error") {
+						if result.AgentMessages == "" {
+							result.Success = false
+						}
+						if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
+							if msg, ok := errMsg["message"].(string); ok {
+								result.Error = "codex error: " + msg
+							}
+						} else if msg, ok := lineData["message"].(string); ok {
+							result.Error = "codex error: " + msg
+						}
+					}
 				}
 			}
 		}
-	}
 
-	if scanErr := scanner.Err(); scanErr != nil {
-		result.Success = false
-		if result.Error == "" {
-			result.Error = fmt.Sprintf("failed to read codex output: %v", scanErr)
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				result.Success = false
+				if result.Error == "" {
+					result.Error = fmt.Sprintf("failed to read codex output: %v", readErr)
+				}
+			}
+			break
 		}
 	}
 
 	// Wait for command to finish
 	if err := cmd.Wait(); err != nil {
-		if result.Error == "" {
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			result.Success = false
+			if result.Error == "" {
+				result.Error = fmt.Sprintf("codex command canceled: %v", ctx.Err())
+			}
+		} else if result.Error == "" {
 			result.Error = fmt.Sprintf("codex command failed: %v", err)
 		}
 	}

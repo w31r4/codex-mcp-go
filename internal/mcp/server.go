@@ -117,7 +117,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	}
 
 	// Execute codex
-	result, err := codex.Run(opts)
+	result, err := codex.Run(ctx, opts)
 	if err != nil {
 		return nil, CodexOutput{}, fmt.Errorf("failed to execute codex: %v", err)
 	}

@@ -158,9 +158,12 @@ claude mcp add codex -s user --transport stdio -- npx -y @zenfun510/codex-mcp-go
 ### 4. 验证
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./codex-mcp-go
+cat <<'EOF' | ./codex-mcp-go
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1.0","capabilities":{}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+EOF
 ```
-若返回包含 `codex` 工具的 JSON 数据，即表示运行正常。
+需先完成 `initialize` 握手，然后才能调用 `tools/list`。若返回包含 `codex` 工具的 JSON 数据，即表示运行正常。
 
 ---
 

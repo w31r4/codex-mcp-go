@@ -137,9 +137,12 @@ For other MCP-compatible clients:
 ### 4. Verify
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./codex-mcp-go
+cat <<'EOF' | ./codex-mcp-go
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1.0","capabilities":{}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+EOF
 ```
-If it returns JSON data containing the `codex` tool, it is running correctly.
+The MCP handshake requires `initialize` before `tools/list`. If the response contains the `codex` tool, it is working.
 
 ---
 

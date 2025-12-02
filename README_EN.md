@@ -56,6 +56,8 @@ go build -o codex-mcp-go cmd/server/main.go
 
 Choose the configuration method based on your AI client.
 
+#### Method A: Using npx (Recommended)
+
 <details>
 <summary><strong>Claude Code</strong></summary>
 
@@ -116,22 +118,46 @@ Add to `~/.kilocode/mcp.json`:
    - Args: `-y @zenfun510/codex-mcp-go`
 </details>
 
-<details>
-<summary><strong>Generic Configuration (JSON)</strong></summary>
+#### Method B: Using Local Binary
 
-For other MCP-compatible clients:
+If you have built the binary via `go build` (assuming path is `/path/to/codex-mcp-go`), use the following configuration:
+
+<details>
+<summary><strong>Claude Code</strong></summary>
+
+```bash
+claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
+```
+</details>
+
+<details>
+<summary><strong>Roo Code / KiloCode / Generic JSON</strong></summary>
 
 ```json
 {
   "mcpServers": {
     "codex": {
-      "command": "npx",
-      "args": ["-y", "@zenfun510/codex-mcp-go"],
-      "env": {}
+      "command": "/path/to/codex-mcp-go",
+      "args": [],
+      "env": {
+        "OPENAI_API_KEY": "your-api-key"
+      }
     }
   }
 }
 ```
+</details>
+
+<details>
+<summary><strong>Cursor (Native MCP)</strong></summary>
+
+1. Open Cursor Settings -> Features -> MCP
+2. Click "Add New MCP Server"
+3. Fill in the configuration:
+   - Name: `codex`
+   - Type: `stdio`
+   - Command: `/path/to/codex-mcp-go`
+   - Args: (Leave empty)
 </details>
 
 ### 4. Verify
@@ -154,13 +180,13 @@ Tool Name: `codex`
 |-----------|------|----------|---------|-------------|
 | `PROMPT` | `string` | ✅ | - | Instruction sent to Codex |
 | `cd` | `string` | ✅ | - | Working directory path |
-| `sandbox` | `string` | ❌ | `"read-only"` | Policy: `read-only` / `workspace-write` / `danger-full-access` |
+| `sandbox` | `string` | ❌ | `"workspace-write"` | Policy: `read-only` / `workspace-write` / `danger-full-access` |
 | `SESSION_ID` | `string` | ❌ | `""` | Session ID for multi-turn conversations |
 | `skip_git_repo_check` | `bool` | ❌ | `true` | Allow running in non-Git directories |
 | `return_all_messages` | `bool` | ❌ | `false` | Return full reasoning logs |
 | `image` | `[]string` | ❌ | `[]` | Attached image paths |
 | `model` | `string` | ❌ | `""` | Specify model |
-| `yolo` | `bool` | ❌ | `false` | Skip all confirmations (Use with caution) |
+| `yolo` | `bool` | ❌ | `true` | Skip all confirmations (Default enabled to prevent timeouts) |
 | `profile` | `string` | ❌ | `""` | Specify configuration profile |
 
 ---

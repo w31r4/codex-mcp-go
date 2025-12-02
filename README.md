@@ -71,6 +71,8 @@ go build -o codex-mcp-go cmd/server/main.go
 
 根据您使用的 AI 客户端，选择对应的配置方式。
 
+#### 方式 A：使用 npx (推荐)
+
 <details>
 <summary><strong>Claude Code</strong></summary>
 
@@ -135,17 +137,27 @@ claude mcp add codex -s user --transport stdio -- npx -y @zenfun510/codex-mcp-go
    - Args: `-y @zenfun510/codex-mcp-go`
 </details>
 
-<details>
-<summary><strong>通用配置 (JSON)</strong></summary>
+#### 方式 B：使用本地二进制文件
 
-适用于其他支持 MCP 的客户端：
+如果您已通过 `go build` 构建了二进制文件（假设路径为 `/path/to/codex-mcp-go`），可使用以下配置：
+
+<details>
+<summary><strong>Claude Code</strong></summary>
+
+```bash
+claude mcp add codex -s user --transport stdio -- /path/to/codex-mcp-go
+```
+</details>
+
+<details>
+<summary><strong>Roo Code / KiloCode / 通用 JSON 配置</strong></summary>
 
 ```json
 {
   "mcpServers": {
     "codex": {
-      "command": "npx",
-      "args": ["-y", "@zenfun510/codex-mcp-go"],
+      "command": "/path/to/codex-mcp-go",
+      "args": [],
       "env": {
         "OPENAI_API_KEY": "your-api-key"
       }
@@ -153,6 +165,18 @@ claude mcp add codex -s user --transport stdio -- npx -y @zenfun510/codex-mcp-go
   }
 }
 ```
+</details>
+
+<details>
+<summary><strong>Cursor (Native MCP)</strong></summary>
+
+1. 打开 Cursor 设置 -> Features -> MCP
+2. 点击 "Add New MCP Server"
+3. 填写配置：
+   - Name: `codex`
+   - Type: `stdio`
+   - Command: `/path/to/codex-mcp-go`
+   - Args: (留空)
 </details>
 
 ### 4. 验证
@@ -175,13 +199,13 @@ EOF
 |------|------|------|--------|------|
 | `PROMPT` | `string` | ✅ | - | 发送给 Codex 的指令 |
 | `cd` | `string` | ✅ | - | 工作目录路径 |
-| `sandbox` | `string` | ❌ | `"read-only"` | 策略：`read-only` / `workspace-write` / `danger-full-access` |
+| `sandbox` | `string` | ❌ | `"workspace-write"` | 策略：`read-only` / `workspace-write` / `danger-full-access` |
 | `SESSION_ID` | `string` | ❌ | `""` | 会话 ID，用于多轮对话 |
 | `skip_git_repo_check` | `bool` | ❌ | `true` | 允许在非 Git 目录运行 |
 | `return_all_messages` | `bool` | ❌ | `false` | 返回完整推理日志 |
 | `image` | `[]string` | ❌ | `[]` | 附加图片路径 |
 | `model` | `string` | ❌ | `""` | 指定模型 |
-| `yolo` | `bool` | ❌ | `false` | 跳过所有确认（慎用） |
+| `yolo` | `bool` | ❌ | `true` | 跳过所有确认（默认开启以防止超时） |
 | `profile` | `string` | ❌ | `""` | 指定配置文件 |
 
 ---

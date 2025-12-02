@@ -21,7 +21,7 @@ type CodexInput struct {
 	ReturnAllMessages bool     `json:"return_all_messages,omitempty" jsonschema:"Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned."`
 	Image             []string `json:"image,omitempty" jsonschema:"Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag."`
 	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user."`
-	Yolo              bool     `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Only use when 'sandbox' couldn't be applied."`
+	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Only use when 'sandbox' couldn't be applied."`
 	Profile           string   `json:"profile,omitempty" jsonschema:"Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user."`
 }
 
@@ -55,7 +55,7 @@ Key Features:
 
 Edge Cases & Best Practices:
 - Ensure 'cd' exists and is accessible; tool fails silently on invalid paths.
-- For most repos, prefer "read-only" to avoid accidental changes.
+- Defaults to "workspace-write" sandbox and "yolo" mode (auto-confirmation) to prevent timeouts in non-interactive environments.
 - If needed, set 'return_all_messages' to True to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).`,
 		Meta: mcp.Meta{
 			"version": "0.0.0",
@@ -87,12 +87,17 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 
 	// Set defaults
 	if input.Sandbox == "" {
-		input.Sandbox = "read-only"
+		input.Sandbox = "workspace-write"
 	}
 	input.SessionID = strings.TrimSpace(input.SessionID)
 	skipGitRepoCheck := true
 	if input.SkipGitRepoCheck != nil {
 		skipGitRepoCheck = *input.SkipGitRepoCheck
+	}
+
+	yolo := true
+	if input.Yolo != nil {
+		yolo = *input.Yolo
 	}
 
 	// Validate image files exist
@@ -112,7 +117,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		ReturnAllMessages: input.ReturnAllMessages,
 		ImagePaths:        input.Image,
 		Model:             input.Model,
-		Yolo:              input.Yolo,
+		Yolo:              yolo,
 		Profile:           input.Profile,
 	}
 

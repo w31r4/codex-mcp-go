@@ -49,7 +49,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	sandbox := opts.Sandbox
 	if sandbox == "" {
-		sandbox = "read-only"
+		sandbox = "workspace-write"
 	}
 
 	// Build the base command

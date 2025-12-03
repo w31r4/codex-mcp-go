@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/w31r4/codex-mcp-go/internal/codex"
 
@@ -23,6 +24,8 @@ type CodexInput struct {
 	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user."`
 	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Defaults to false to avoid unsafe execution."`
 	Profile           string   `json:"profile,omitempty" jsonschema:"Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user."`
+	TimeoutSeconds    *int     `json:"timeout_seconds,omitempty" jsonschema:"Total timeout (seconds) for the codex invocation. Defaults to 1800 (30 minutes) if not set; capped at 1800 (30 minutes)."`
+	NoOutputSeconds   *int     `json:"no_output_seconds,omitempty" jsonschema:"No-output watchdog (seconds). Kill the run if no output for this duration. Defaults to 0 (disabled) if not set."`
 }
 
 // CodexOutput represents the output from the codex tool
@@ -112,6 +115,19 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		return nil, CodexOutput{}, fmt.Errorf("profile parameter is prohibited; omit it or enable an explicit allowlist")
 	}
 
+	var timeout time.Duration
+	if input.TimeoutSeconds != nil && *input.TimeoutSeconds > 0 {
+		timeout = time.Duration(*input.TimeoutSeconds) * time.Second
+	}
+	if timeout > 30*time.Minute {
+		timeout = 30 * time.Minute
+	}
+
+	var noOutput time.Duration
+	if input.NoOutputSeconds != nil && *input.NoOutputSeconds > 0 {
+		noOutput = time.Duration(*input.NoOutputSeconds) * time.Second
+	} // nil or <=0 keeps default (disabled)
+
 	// Validate image files exist
 	for _, imgPath := range input.Image {
 		if _, err := os.Stat(imgPath); err != nil {
@@ -131,6 +147,8 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		Model:             input.Model,
 		Yolo:              yolo,
 		Profile:           input.Profile,
+		Timeout:           timeout,
+		NoOutputTimeout:   noOutput,
 	}
 
 	// Execute codex

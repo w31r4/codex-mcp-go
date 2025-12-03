@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	defaultCommandTimeout  = 10 * time.Minute
-	defaultNoOutputTimeout = 2 * time.Minute
+	defaultCommandTimeout  = 30 * time.Minute
+	maxCommandTimeout      = 30 * time.Minute
+	defaultNoOutputTimeout = 0 // disabled by default
 	maxBufferedOutputLines = 100
 )
 
@@ -53,6 +54,9 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = defaultCommandTimeout
+	}
+	if opts.Timeout > maxCommandTimeout {
+		opts.Timeout = maxCommandTimeout
 	}
 	if opts.NoOutputTimeout <= 0 {
 		opts.NoOutputTimeout = defaultNoOutputTimeout
@@ -145,19 +149,32 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}()
 
-	noOutputTimer := time.NewTimer(opts.NoOutputTimeout)
-	defer noOutputTimer.Stop()
+	var noOutputTimer *time.Timer
+	var noOutputCh <-chan time.Time
 	lastOutput := time.Now()
 
-	resetNoOutputTimer := func() {
-		if !noOutputTimer.Stop() {
-			select {
-			case <-noOutputTimer.C:
-			default:
+	resetNoOutputTimer := func() {}
+	if opts.NoOutputTimeout > 0 {
+		noOutputTimer = time.NewTimer(opts.NoOutputTimeout)
+		noOutputCh = noOutputTimer.C
+		resetNoOutputTimer = func() {
+			if noOutputTimer == nil {
+				return
 			}
+			if !noOutputTimer.Stop() {
+				select {
+				case <-noOutputTimer.C:
+				default:
+				}
+			}
+			noOutputTimer.Reset(opts.NoOutputTimeout)
 		}
-		noOutputTimer.Reset(opts.NoOutputTimeout)
 	}
+	defer func() {
+		if noOutputTimer != nil {
+			noOutputTimer.Stop()
+		}
+	}()
 
 drainLoop:
 	for {
@@ -230,7 +247,7 @@ drainLoop:
 				}
 			}
 			readErrCh = nil
-		case <-noOutputTimer.C:
+		case <-noOutputCh:
 			result.Success = false
 			if result.Error == "" {
 				result.Error = fmt.Sprintf("no output from codex for %s (last output at %s)", opts.NoOutputTimeout, lastOutput.Format(time.RFC3339))

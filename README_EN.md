@@ -172,6 +172,91 @@ The MCP handshake requires `initialize` before `tools/list`. If the response con
 
 ---
 
+## Recommended System Prompts
+
+To get the best experience, it is recommended to configure the appropriate system prompt based on the client type you are using.
+
+### 1. Agent Mode
+
+Suitable for Agents capable of autonomous planning and execution of multi-step tasks. Add the following to your Agent configuration or as the initial instruction for the task:
+
+<details>
+<summary><strong>Click to expand detailed prompt</strong></summary>
+
+```text
+## Core Instruction for CodeX MCP
+
+At any moment, you must consider how the current process can collaborate with Codex, and how to invoke the MCP tools provided by Codex as a guarantee for your objective and comprehensive analysis.
+You **MUST execute** the following steps:
+**1** After forming a preliminary analysis of the user's requirements, inform Codex of the user's requirements and your initial thoughts, and ask it to refine the requirement analysis and implementation plan.
+**2** Before implementing specific coding tasks, **you MUST ask Codex for a code implementation prototype (require Codex to provide ONLY a unified diff patch, strictly forbidding any real modification to the code)**. After obtaining the code prototype, you **can only use it as a logical reference and rewrite the code modification** to form enterprise production-level, highly readable, and highly maintainable code before implementing the specific programming modification task.
+**3** Whenever a tangible coding action is completed, **you MUST immediately use Codex to review the code changes and the degree of completion of the corresponding requirements**.
+**4** Codex can only provide references; you **MUST have your own thinking and even need to question Codex's answers**. Believing everything in books is worse than having no books at all. The ultimate mission for you and Codex is to reach a unified, comprehensive, and precise opinion, so you must constantly debate to find the only way to truth.
+
+## Codex Tool Invocation Specification
+
+1. Tool Overview
+   The codex MCP provides a tool `codex` for executing AI-assisted coding tasks. This tool is **invoked via the MCP protocol**, without the need to use the command line.
+
+2. Tool Parameters
+   **Required** Parameters:
+   - PROMPT (string): The task instruction sent to Codex.
+   - cd (Path): The root path of the working directory where Codex executes the task.
+
+   Optional Parameters:
+   - sandbox (string): Sandbox policy, possible values:
+     - "read-only" (Default): Read-only mode, safest.
+     - "workspace-write": Allows writing in the workspace.
+     - "danger-full-access": Full access permission.
+   - SESSION_ID (UUID | null): Used to continue a previous session for multi-turn interaction with Codex. Defaults to None (start a new session).
+   - skip_git_repo_check (boolean): Whether to allow running in a non-Git repository. Defaults to False.
+   - return_all_messages (boolean): Whether to return all messages (including reasoning, tool calls, etc.). Defaults to False.
+   - image (List[Path] | null): Attach one or more image files to the initial prompt. Defaults to None.
+   - model (string | null): Specify the model to use. Defaults to None (use user default config).
+   - yolo (boolean | null): Run all commands without approval (skip sandbox). Defaults to False.
+   - profile (string | null): Configuration profile name loaded from `~/.codex/config.toml`. Defaults to None (use user default config).
+
+3. Invocation Specification
+   **MUST Comply**:
+   - Every time the codex tool is called, the returned SESSION_ID must be saved for subsequent dialogue.
+   - The cd parameter must point to an existing directory, otherwise the tool will fail silently.
+   - It is strictly forbidden for Codex to make actual modifications to the code. Use sandbox="read-only" to avoid accidents, and ask Codex to provide only a unified diff patch.
+
+   Recommended Usage:
+   - If you need to track Codex's reasoning process and tool calls in detail, set return_all_messages=True.
+   - For tasks such as precise positioning, debugging, and rapid code prototyping, prioritize using the codex tool.
+```
+</details>
+
+### 2. Copilot Mode
+
+Suitable for assistants running as IDE plugins. Recommended to add to `.clinerules` (Roo Code) or "Rules for AI" (Cursor):
+
+<details>
+<summary><strong>Click to expand rule prompt</strong></summary>
+
+```text
+# Codex MCP Tool Rules
+
+You have access to the `codex` tool, which wraps the OpenAI Codex CLI. Use it for complex code generation, debugging, and analysis.
+
+## Workflow
+1.  **Consultation**: Before writing complex code, ask Codex for a plan or analysis.
+2.  **Prototyping**: Ask Codex for a `unified diff patch` to solve the problem.
+    *   **IMPORTANT**: Always use `sandbox="read-only"` when asking for code.
+    *   **IMPORTANT**: Do NOT let Codex apply changes directly.
+3.  **Implementation**: Read the Codex-generated diff, understand it, and then apply the changes yourself using your own file editing tools.
+4.  **Review**: After applying changes, you can ask Codex to review the code.
+
+## Tool Usage
+-   **Session**: Always capture and reuse `SESSION_ID` for multi-turn tasks.
+-   **Path**: Ensure `cd` is set to the current workspace root.
+-   **Safety**: Default to `sandbox="read-only"`. Only use `workspace-write` if explicitly instructed by the user and you are confident in the operation.
+```
+</details>
+
+---
+
 ## Tool Parameters
 
 Tool Name: `codex`
@@ -188,9 +273,11 @@ Tool Name: `codex`
 | `model` | `string` | ❌ | `""` | Prohibited unless explicitly allowlisted |
 | `yolo` | `bool` | ❌ | `false` | Skip all confirmations (non-interactive) |
 | `profile` | `string` | ❌ | `""` | Prohibited unless explicitly allowlisted |
+| `timeout_seconds` | `int` | ❌ | `1800` | Total timeout (seconds) for the codex invocation (cap: 1800) |
+| `no_output_seconds` | `int` | ❌ | `0` | Kill the run if no output for this many seconds (0 disables) |
 
-**Runtime behavior:** Codex invocations enforce a 10m total timeout and a 2m no-output watchdog; failures/non-zero exits or error lines are surfaced with recent output to help debug hangs.
-**Defaults:** `sandbox=read-only`, `yolo=false`, `skip_git_repo_check=false`; `model/profile` are rejected unless you explicitly allowlist them.
+**Runtime behavior:** Codex invocations default to a 30m total timeout (capped at 30m) with an optional no-output watchdog (disabled by default); failures/non-zero exits or error lines are surfaced with recent output. For slow networks or MCP clients with shorter RPC timeouts, keep `timeout_seconds=1800` on the tool call to avoid premature cancellation.
+**Defaults:** `sandbox=read-only`, `yolo=false`, `skip_git_repo_check=false`; `model/profile` are rejected unless you explicitly allowlist them; `timeout_seconds=1800` (capped at 1800), `no_output_seconds=0` (disabled).
 
 ---
 

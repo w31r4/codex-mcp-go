@@ -15,13 +15,13 @@ import (
 type CodexInput struct {
 	PROMPT            string   `json:"PROMPT" jsonschema:"Instruction for the task to send to codex."`
 	Cd                string   `json:"cd" jsonschema:"Set the workspace root for codex before executing the task."`
-	Sandbox           string   `json:"sandbox,omitempty" jsonschema:"Sandbox policy for model-generated commands. Defaults to 'workspace-write'."`
+	Sandbox           string   `json:"sandbox,omitempty" jsonschema:"Sandbox policy for model-generated commands. Defaults to 'read-only'."`
 	SessionID         string   `json:"SESSION_ID,omitempty" jsonschema:"Resume the specified session of the codex. Defaults to None, start a new session."`
 	SkipGitRepoCheck  *bool    `json:"skip_git_repo_check,omitempty" jsonschema:"Allow codex running outside a Git repository (useful for one-off directories)."`
 	ReturnAllMessages bool     `json:"return_all_messages,omitempty" jsonschema:"Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned."`
 	Image             []string `json:"image,omitempty" jsonschema:"Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag."`
 	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user."`
-	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Defaults to true to prevent timeouts."`
+	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Defaults to false to avoid unsafe execution."`
 	Profile           string   `json:"profile,omitempty" jsonschema:"Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user."`
 }
 
@@ -55,7 +55,7 @@ Key Features:
 
 Edge Cases & Best Practices:
 - Ensure 'cd' exists and is accessible; tool fails silently on invalid paths.
-- Defaults to "workspace-write" sandbox and "yolo" mode (auto-confirmation) to prevent timeouts in non-interactive environments.
+- Defaults to "read-only" sandbox and disables "yolo" (auto-confirmation); enable write/yolo explicitly if your workflow requires it.
 - If needed, set 'return_all_messages' to True to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).`,
 		Meta: mcp.Meta{
 			"version": "0.0.0",
@@ -81,13 +81,17 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	}
 
 	// Validate working directory exists
-	if _, err := os.Stat(input.Cd); err != nil {
+	info, err := os.Stat(input.Cd)
+	if err != nil {
 		return nil, CodexOutput{}, fmt.Errorf("working directory does not exist: %s", input.Cd)
+	}
+	if !info.IsDir() {
+		return nil, CodexOutput{}, fmt.Errorf("working directory is not a directory: %s", input.Cd)
 	}
 
 	// Set defaults
 	if input.Sandbox == "" {
-		input.Sandbox = "workspace-write"
+		input.Sandbox = "read-only"
 	}
 	input.SessionID = strings.TrimSpace(input.SessionID)
 	skipGitRepoCheck := true
@@ -95,9 +99,17 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		skipGitRepoCheck = *input.SkipGitRepoCheck
 	}
 
-	yolo := true
+	yolo := false
 	if input.Yolo != nil {
 		yolo = *input.Yolo
+	}
+
+	if input.Model != "" {
+		return nil, CodexOutput{}, fmt.Errorf("model parameter is prohibited; omit it or enable an explicit allowlist")
+	}
+
+	if input.Profile != "" {
+		return nil, CodexOutput{}, fmt.Errorf("profile parameter is prohibited; omit it or enable an explicit allowlist")
 	}
 
 	// Validate image files exist

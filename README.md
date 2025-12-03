@@ -199,14 +199,17 @@ EOF
 |------|------|------|--------|------|
 | `PROMPT` | `string` | ✅ | - | 发送给 Codex 的指令 |
 | `cd` | `string` | ✅ | - | 工作目录路径 |
-| `sandbox` | `string` | ❌ | `"workspace-write"` | 策略：`read-only` / `workspace-write` / `danger-full-access` |
+| `sandbox` | `string` | ❌ | `"read-only"` | 策略：`read-only` / `workspace-write` / `danger-full-access` |
 | `SESSION_ID` | `string` | ❌ | `""` | 会话 ID，用于多轮对话 |
 | `skip_git_repo_check` | `bool` | ❌ | `true` | 允许在非 Git 目录运行 |
 | `return_all_messages` | `bool` | ❌ | `false` | 返回完整推理日志 |
 | `image` | `[]string` | ❌ | `[]` | 附加图片路径 |
-| `model` | `string` | ❌ | `""` | 指定模型 |
-| `yolo` | `bool` | ❌ | `true` | 跳过所有确认（默认开启以防止超时） |
-| `profile` | `string` | ❌ | `""` | 指定配置文件 |
+| `model` | `string` | ❌ | `""` | 默认禁止，除非显式允许 |
+| `yolo` | `bool` | ❌ | `false` | 跳过所有确认（非交互） |
+| `profile` | `string` | ❌ | `""` | 默认禁止，除非显式允许 |
+
+**运行时行为：** 内置 10 分钟总超时与 2 分钟无输出看门狗；出现错误行、非零退出会携带最近输出返回，便于定位卡住原因。
+**默认策略：** `sandbox=read-only`、`yolo=false`、`skip_git_repo_check=false`；`model/profile` 默认拒绝，需显式放行才可使用。
 
 ---
 

@@ -180,14 +180,17 @@ Tool Name: `codex`
 |-----------|------|----------|---------|-------------|
 | `PROMPT` | `string` | ✅ | - | Instruction sent to Codex |
 | `cd` | `string` | ✅ | - | Working directory path |
-| `sandbox` | `string` | ❌ | `"workspace-write"` | Policy: `read-only` / `workspace-write` / `danger-full-access` |
+| `sandbox` | `string` | ❌ | `"read-only"` | Policy: `read-only` / `workspace-write` / `danger-full-access` |
 | `SESSION_ID` | `string` | ❌ | `""` | Session ID for multi-turn conversations |
 | `skip_git_repo_check` | `bool` | ❌ | `true` | Allow running in non-Git directories |
 | `return_all_messages` | `bool` | ❌ | `false` | Return full reasoning logs |
 | `image` | `[]string` | ❌ | `[]` | Attached image paths |
-| `model` | `string` | ❌ | `""` | Specify model |
-| `yolo` | `bool` | ❌ | `true` | Skip all confirmations (Default enabled to prevent timeouts) |
-| `profile` | `string` | ❌ | `""` | Specify configuration profile |
+| `model` | `string` | ❌ | `""` | Prohibited unless explicitly allowlisted |
+| `yolo` | `bool` | ❌ | `false` | Skip all confirmations (non-interactive) |
+| `profile` | `string` | ❌ | `""` | Prohibited unless explicitly allowlisted |
+
+**Runtime behavior:** Codex invocations enforce a 10m total timeout and a 2m no-output watchdog; failures/non-zero exits or error lines are surfaced with recent output to help debug hangs.
+**Defaults:** `sandbox=read-only`, `yolo=false`, `skip_git_repo_check=false`; `model/profile` are rejected unless you explicitly allowlist them.
 
 ---
 

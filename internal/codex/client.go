@@ -11,6 +11,13 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
+)
+
+const (
+	defaultCommandTimeout  = 10 * time.Minute
+	defaultNoOutputTimeout = 2 * time.Minute
+	maxBufferedOutputLines = 100
 )
 
 // Options represents the parameters for a Codex CLI execution
@@ -25,6 +32,8 @@ type Options struct {
 	Model             string
 	Yolo              bool
 	Profile           string
+	Timeout           time.Duration
+	NoOutputTimeout   time.Duration
 }
 
 // Result represents the parsed result from Codex CLI output
@@ -42,6 +51,14 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = defaultCommandTimeout
+	}
+	if opts.NoOutputTimeout <= 0 {
+		opts.NoOutputTimeout = defaultNoOutputTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
 
 	prompt := opts.Prompt
 	if runtime.GOOS == "windows" {
@@ -49,11 +66,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	sandbox := opts.Sandbox
 	if sandbox == "" {
-		sandbox = "workspace-write"
+		sandbox = "read-only"
+	}
+
+	codexPath, lookErr := exec.LookPath("codex")
+	if lookErr != nil {
+		return nil, fmt.Errorf("codex executable not found in PATH: %w", lookErr)
 	}
 
 	// Build the base command
-	cmd := exec.CommandContext(ctx, "codex", "exec", "--sandbox", sandbox, "--cd", opts.WorkingDir, "--json")
+	cmd := exec.CommandContext(ctx, codexPath, "exec", "--sandbox", sandbox, "--cd", opts.WorkingDir, "--json")
 
 	// Add optional flags
 	if len(opts.ImagePaths) > 0 {
@@ -99,76 +121,153 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		AllMessages: make([]map[string]interface{}, 0),
 	}
 
-	reader := bufio.NewReader(stdout)
+	agentMessages := make([]string, 0)
+	recentLines := make([]string, 0)
+
+	lineCh := make(chan []byte)
+	readErrCh := make(chan error, 1)
+
+	go func() {
+		defer close(lineCh)
+		defer close(readErrCh)
+		reader := bufio.NewReader(stdout)
+		for {
+			line, err := reader.ReadBytes('\n')
+			if len(line) > 0 {
+				lineCh <- bytes.TrimSpace(line)
+			}
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					readErrCh <- err
+				}
+				return
+			}
+		}
+	}()
+
+	noOutputTimer := time.NewTimer(opts.NoOutputTimeout)
+	defer noOutputTimer.Stop()
+	lastOutput := time.Now()
+
+	resetNoOutputTimer := func() {
+		if !noOutputTimer.Stop() {
+			select {
+			case <-noOutputTimer.C:
+			default:
+			}
+		}
+		noOutputTimer.Reset(opts.NoOutputTimeout)
+	}
+
+drainLoop:
 	for {
-		line, readErr := reader.ReadBytes('\n')
-		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) > 0 {
+		select {
+		case trimmed, ok := <-lineCh:
+			if !ok {
+				break drainLoop
+			}
+			resetNoOutputTimer()
+			lastOutput = time.Now()
+			if len(trimmed) == 0 {
+				continue
+			}
+
+			recentLines = append(recentLines, string(trimmed))
+			if len(recentLines) > maxBufferedOutputLines {
+				recentLines = recentLines[1:]
+			}
+
 			var lineData map[string]interface{}
 			if err := json.Unmarshal(trimmed, &lineData); err != nil {
-				// Keep draining output to avoid blocking the codex process.
+				result.Success = false
 				if result.Error == "" {
-					result.Success = false
 					result.Error = fmt.Sprintf("JSON parse error: %v. Line: %s", err, string(trimmed))
 				}
-			} else {
-				// Collect all messages if requested
-				if opts.ReturnAllMessages {
-					result.AllMessages = append(result.AllMessages, lineData)
-				}
+				continue
+			}
 
-				// Extract thread_id
-				if threadID, ok := lineData["thread_id"].(string); ok && threadID != "" {
-					result.SessionID = threadID
-				}
+			// Collect all messages if requested
+			if opts.ReturnAllMessages {
+				result.AllMessages = append(result.AllMessages, lineData)
+			}
 
-				// Extract agent messages
-				if item, ok := lineData["item"].(map[string]interface{}); ok {
-					if itemType, ok := item["type"].(string); ok && itemType == "agent_message" {
-						if text, ok := item["text"].(string); ok {
-							result.AgentMessages += text
-						}
-					}
-				}
+			// Extract thread_id
+			if threadID, ok := lineData["thread_id"].(string); ok && threadID != "" {
+				result.SessionID = threadID
+			}
 
-				// Check for errors
-				if lineType, ok := lineData["type"].(string); ok {
-					if strings.Contains(lineType, "fail") || strings.Contains(lineType, "error") {
-						if result.AgentMessages == "" {
-							result.Success = false
-						}
-						if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
-							if msg, ok := errMsg["message"].(string); ok {
-								result.Error = "codex error: " + msg
-							}
-						} else if msg, ok := lineData["message"].(string); ok {
-							result.Error = "codex error: " + msg
-						}
+			// Extract agent messages
+			if item, ok := lineData["item"].(map[string]interface{}); ok {
+				if itemType, ok := item["type"].(string); ok && itemType == "agent_message" {
+					if text, ok := item["text"].(string); ok {
+						agentMessages = append(agentMessages, text)
 					}
 				}
 			}
-		}
 
-		if readErr != nil {
-			if !errors.Is(readErr, io.EOF) {
+			// Check for errors
+			if lineType, ok := lineData["type"].(string); ok {
+				if strings.Contains(lineType, "fail") || strings.Contains(lineType, "error") {
+					result.Success = false
+					if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
+						if msg, ok := errMsg["message"].(string); ok {
+							result.Error = "codex error: " + msg
+						}
+					} else if msg, ok := lineData["message"].(string); ok {
+						result.Error = "codex error: " + msg
+					}
+				}
+			}
+		case readErr, ok := <-readErrCh:
+			if !ok {
+				readErrCh = nil
+				continue
+			}
+			if readErr != nil {
 				result.Success = false
 				if result.Error == "" {
 					result.Error = fmt.Sprintf("failed to read codex output: %v", readErr)
 				}
 			}
-			break
+			readErrCh = nil
+		case <-noOutputTimer.C:
+			result.Success = false
+			if result.Error == "" {
+				result.Error = fmt.Sprintf("no output from codex for %s (last output at %s)", opts.NoOutputTimeout, lastOutput.Format(time.RFC3339))
+				if len(recentLines) > 0 {
+					result.Error += "\nrecent output:\n" + strings.Join(recentLines, "\n")
+				}
+			}
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			break drainLoop
+		case <-ctx.Done():
+			result.Success = false
+			if result.Error == "" {
+				result.Error = fmt.Sprintf("codex command context canceled: %v", ctx.Err())
+			}
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			break drainLoop
 		}
 	}
 
+	result.AgentMessages = strings.Join(agentMessages, "\n")
+
 	// Wait for command to finish
 	if err := cmd.Wait(); err != nil {
+		result.Success = false
 		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			result.Success = false
 			if result.Error == "" {
 				result.Error = fmt.Sprintf("codex command canceled: %v", ctx.Err())
 			}
 		} else if result.Error == "" {
 			result.Error = fmt.Sprintf("codex command failed: %v", err)
+			if len(recentLines) > 0 {
+				result.Error += "\nrecent output:\n" + strings.Join(recentLines, "\n")
+			}
 		}
 	}
 

@@ -45,3 +45,6 @@ Thumbs.db
 .mcpregistry_github_token
 RELEASE_GUIDE.md
 scripts/
+backup/
+.prettierrc
+plans/

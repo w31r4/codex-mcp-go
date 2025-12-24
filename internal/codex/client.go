@@ -19,7 +19,25 @@ const (
 	maxCommandTimeout      = 30 * time.Minute
 	defaultNoOutputTimeout = 0 // disabled by default
 	maxBufferedOutputLines = 100
+
+	// Sandbox mode constants
+	SandboxReadOnly         = "read-only"
+	SandboxWorkspaceWrite   = "workspace-write"
+	SandboxDangerFullAccess = "danger-full-access"
 )
+
+// ValidSandboxModes contains all valid sandbox mode values
+var ValidSandboxModes = []string{SandboxReadOnly, SandboxWorkspaceWrite, SandboxDangerFullAccess}
+
+// IsValidSandbox checks if the given sandbox value is valid
+func IsValidSandbox(sandbox string) bool {
+	for _, valid := range ValidSandboxModes {
+		if sandbox == valid {
+			return true
+		}
+	}
+	return false
+}
 
 // Options represents the parameters for a Codex CLI execution
 type Options struct {
@@ -70,7 +88,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	sandbox := opts.Sandbox
 	if sandbox == "" {
-		sandbox = "read-only"
+		sandbox = SandboxReadOnly
+	}
+	if !IsValidSandbox(sandbox) {
+		return nil, fmt.Errorf("invalid sandbox mode %q: must be one of %v", sandbox, ValidSandboxModes)
 	}
 
 	codexPath, lookErr := exec.LookPath("codex")

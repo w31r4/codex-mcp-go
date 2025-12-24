@@ -16,8 +16,17 @@
 
 ## 简介
 
-`codex-mcp-go` 是一个基于 Go 语言实现的 MCP (Model Context Protocol) 服务器。它封装了 OpenAI 的 Codex CLI，使其能够作为 MCP 工具被 Claude Code、Roo Code、KiloCode 等 AI 客户端调用。
-codex 在细节和 bug 修复方面的能力有目共睹, 但是很多时候用起来会感觉稍微缺乏全局视野, 所以我目前的工作流是使用 gemini 3.0 pro 的 kilocode 作为主要的规划者, codex 可以负责复杂功能的落地和 bug 修复
+`codex-mcp-go` 是一个基于 Go 语言实现的 MCP (Model Context Protocol) 服务器。它封装了 OpenAI 的 Codex CLI，使其能够作为 MCP 工具被 KiloCode、Roo Code、Cline 等各种 "Vibe Coding" AI 客户端调用。
+
+这个项目的初衷很简单：**让强者更强，让专才专用**。
+
+在我自己的工作流中（在 KiloCode 里使用 Gemini 3.0 Pro），我发现像 Gemini 这样的先进模型拥有强大的规划能力和想象力，但在修复自己生成的复杂代码时偶尔会“卡壳”。而 Codex，这位老练的“代码老师傅”，虽然在宏大叙事上稍逊一筹，但在具体的代码实现、Bug 修复和遵循精确指令方面却无人能及。
+
+所以，为什么不让它们合作呢？
+
+受到 [codexmcp](https://github.com/GuDaStudio/codexmcp) (Python 实现) 的启发，我决定用我更喜欢的 Go 语言，边学 `mcp-go-sdk` 边重复造了这个轮子，主要目的是练手并打造一个更适合我自己的工具。
+
+现在，你可以用一句话，在任何支持 MCP 的 Vibe Coding 工具中，让 Gemini 或 Claude 这样的“总指挥”去调用 Codex 这个“特种兵”来完成最棘手的编码任务。
 
 主要特性：
 - **会话管理**：支持 `SESSION_ID` 维持多轮对话上下文。

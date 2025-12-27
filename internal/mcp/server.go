@@ -40,7 +40,7 @@ type CodexOutput struct {
 func NewServer() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    "Codex MCP Server-from guda.studio",
-		Version: "0.0.7",
+		Version: "0.0.8",
 	}, nil)
 
 	// Define the codex tool
@@ -62,7 +62,7 @@ Edge Cases & Best Practices:
 - Disables "yolo" (auto-confirmation) by default; enable write/yolo explicitly if your workflow requires it.
 - If needed, set 'return_all_messages' to True to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).`,
 		Meta: mcp.Meta{
-			"version": "0.0.7",
+			"version": "0.0.8",
 			"author":  "guda.studio",
 		},
 	}

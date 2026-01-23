@@ -2,7 +2,7 @@ module github.com/w31r4/codex-mcp-go
 
 go 1.24.5
 
-require github.com/modelcontextprotocol/go-sdk v1.1.0
+require github.com/modelcontextprotocol/go-sdk v1.2.0
 
 require (
 	github.com/google/jsonschema-go v0.3.0 // indirect

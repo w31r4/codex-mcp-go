@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -15,8 +17,8 @@ import (
 )
 
 const (
-	defaultCommandTimeout  = 30 * time.Minute
-	maxCommandTimeout      = 30 * time.Minute
+	defaultCommandTimeout  = 60 * time.Minute
+	maxCommandTimeout      = 60 * time.Minute
 	defaultNoOutputTimeout = 0 // disabled by default
 	maxBufferedOutputLines = 100
 
@@ -39,6 +41,17 @@ func IsValidSandbox(sandbox string) bool {
 	return false
 }
 
+// StreamEvent represents a single output event from Codex CLI
+type StreamEvent struct {
+	RawLine      string                 // Raw output line
+	IsJSON       bool                   // Whether the line is valid JSON
+	JSON         map[string]interface{} // Parsed JSON data (nil if not JSON)
+	AgentMessage string                 // Extracted agent message text (if any)
+}
+
+// StreamHandler is a callback function for streaming output events
+type StreamHandler func(StreamEvent)
+
 // Options represents the parameters for a Codex CLI execution
 type Options struct {
 	Prompt            string
@@ -53,6 +66,10 @@ type Options struct {
 	Profile           string
 	Timeout           time.Duration
 	NoOutputTimeout   time.Duration
+	// Streaming and logging options
+	StreamHandler StreamHandler // Callback for each output line
+	Logger        *slog.Logger  // Logger for debug output
+	Debug         bool          // Enable debug logging
 }
 
 // Result represents the parsed result from Codex CLI output
@@ -94,6 +111,31 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("invalid sandbox mode %q: must be one of %v", sandbox, ValidSandboxModes)
 	}
 
+	// Initialize logger
+	logger := opts.Logger
+	if logger == nil && opts.Debug {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+
+	// Helper functions for logging and streaming
+	logDebug := func(msg string, args ...any) {
+		if logger != nil {
+			logger.Debug(msg, args...)
+		}
+	}
+
+	emitStream := func(evt StreamEvent) {
+		if opts.StreamHandler == nil {
+			return
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				logDebug("stream handler panic", "panic", r)
+			}
+		}()
+		opts.StreamHandler(evt)
+	}
+
 	codexPath, lookErr := exec.LookPath("codex")
 	if lookErr != nil {
 		return nil, fmt.Errorf("codex executable not found in PATH: %w", lookErr)
@@ -126,6 +168,16 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	// Add the prompt at the end
 	cmd.Args = append(cmd.Args, "--", prompt)
+
+	// Log command start (hide prompt for security)
+	if logger != nil {
+		args := make([]string, len(cmd.Args))
+		copy(args, cmd.Args)
+		if len(args) > 0 {
+			args[len(args)-1] = "<prompt>"
+		}
+		logger.Debug("starting codex", "args", args)
+	}
 
 	// Capture stdout and stderr
 	stdout, err := cmd.StdoutPipe()
@@ -215,14 +267,20 @@ drainLoop:
 				recentLines = recentLines[1:]
 			}
 
+			// Create stream event
+			evt := StreamEvent{RawLine: string(trimmed)}
+
 			var lineData map[string]interface{}
 			if err := json.Unmarshal(trimmed, &lineData); err != nil {
-				result.Success = false
-				if result.Error == "" {
-					result.Error = fmt.Sprintf("JSON parse error: %v. Line: %s", err, string(trimmed))
-				}
+				// Skip non-JSON lines instead of failing
+				// Codex may output debug info or error messages that are not JSON
+				logDebug("skipping non-json output", "error", err, "line", evt.RawLine)
+				emitStream(evt)
 				continue
 			}
+
+			evt.IsJSON = true
+			evt.JSON = lineData
 
 			// Collect all messages if requested
 			if opts.ReturnAllMessages {
@@ -239,23 +297,19 @@ drainLoop:
 				if itemType, ok := item["type"].(string); ok && itemType == "agent_message" {
 					if text, ok := item["text"].(string); ok {
 						agentMessages = append(agentMessages, text)
+						evt.AgentMessage = text
 					}
 				}
 			}
 
-			// Check for errors
-			if lineType, ok := lineData["type"].(string); ok {
-				if strings.Contains(lineType, "fail") || strings.Contains(lineType, "error") {
-					result.Success = false
-					if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
-						if msg, ok := errMsg["message"].(string); ok {
-							result.Error = "codex error: " + msg
-						}
-					} else if msg, ok := lineData["message"].(string); ok {
-						result.Error = "codex error: " + msg
-					}
-				}
-			}
+			// Emit stream event
+			emitStream(evt)
+
+			// Note: We don't check for intermediate errors here because Codex has
+			// a retry mechanism (up to 5 reconnection attempts on network issues).
+			// Setting Success=false on first error would incorrectly fail the whole
+			// operation. Instead, we judge success at the end based on whether we
+			// got valid SessionID and AgentMessages.
 		case readErr, ok := <-readErrCh:
 			if !ok {
 				readErrCh = nil
@@ -318,6 +372,15 @@ drainLoop:
 	if result.AgentMessages == "" {
 		result.Success = false
 		result.Error = "Failed to get agent_messages from the codex session. \n\n You can try to set return_all_messages to true to get the full reasoning information. \n\n " + result.Error
+	}
+
+	// Log completion
+	if logger != nil {
+		if result.Success {
+			logger.Debug("codex completed", "session_id", result.SessionID)
+		} else {
+			logger.Debug("codex failed", "error", result.Error)
+		}
 	}
 
 	return result, nil

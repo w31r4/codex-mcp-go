@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/w31r4/codex-mcp-go/internal/codex"
@@ -16,15 +18,15 @@ import (
 type CodexInput struct {
 	PROMPT            string   `json:"PROMPT" jsonschema:"Instruction for the task to send to codex."`
 	Cd                string   `json:"cd" jsonschema:"Set the workspace root for codex before executing the task."`
-	Sandbox           string   `json:"sandbox,omitempty" jsonschema:"enum=read-only,enum=workspace-write,enum=danger-full-access,description=Sandbox policy for model-generated commands. Valid values: read-only (default) workspace-write danger-full-access."`
+	Sandbox           string   `json:"sandbox,omitempty" jsonschema:"Sandbox policy for model-generated commands. Valid values: read-only (default) | workspace-write | danger-full-access."`
 	SessionID         string   `json:"SESSION_ID,omitempty" jsonschema:"Resume the specified session of the codex. Defaults to None, start a new session."`
-	SkipGitRepoCheck  *bool    `json:"skip_git_repo_check,omitempty" jsonschema:"Allow codex running outside a Git repository (useful for one-off directories)."`
+	SkipGitRepoCheck  *bool    `json:"skip_git_repo_check,omitempty" jsonschema:"Allow codex running outside a Git repository (useful for one-off directories). Defaults to true."`
 	ReturnAllMessages bool     `json:"return_all_messages,omitempty" jsonschema:"Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned."`
+	StreamOutput      *bool    `json:"stream_output,omitempty" jsonschema:"Stream codex output via MCP logging notifications. Defaults to false."`
+	Debug             *bool    `json:"debug,omitempty" jsonschema:"Enable debug logging to stderr. Defaults to false."`
 	Image             []string `json:"image,omitempty" jsonschema:"Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag."`
-	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user."`
 	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Defaults to false to avoid unsafe execution."`
-	Profile           string   `json:"profile,omitempty" jsonschema:"Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user."`
-	TimeoutSeconds    *int     `json:"timeout_seconds,omitempty" jsonschema:"Total timeout (seconds) for the codex invocation. Defaults to 1800 (30 minutes) if not set; capped at 1800 (30 minutes)."`
+	TimeoutSeconds    *int     `json:"timeout_seconds,omitempty" jsonschema:"Total timeout (seconds) for the codex invocation. Defaults to 3600 (60 minutes) if not set; capped at 3600 (60 minutes)."`
 	NoOutputSeconds   *int     `json:"no_output_seconds,omitempty" jsonschema:"No-output watchdog (seconds). Kill the run if no output for this duration. Defaults to 0 (disabled) if not set."`
 }
 
@@ -108,20 +110,12 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		yolo = *input.Yolo
 	}
 
-	if input.Model != "" {
-		return nil, CodexOutput{}, fmt.Errorf("model parameter is prohibited; omit it or enable an explicit allowlist")
-	}
-
-	if input.Profile != "" {
-		return nil, CodexOutput{}, fmt.Errorf("profile parameter is prohibited; omit it or enable an explicit allowlist")
-	}
-
 	var timeout time.Duration
 	if input.TimeoutSeconds != nil && *input.TimeoutSeconds > 0 {
 		timeout = time.Duration(*input.TimeoutSeconds) * time.Second
 	}
-	if timeout > 30*time.Minute {
-		timeout = 30 * time.Minute
+	if timeout > 60*time.Minute {
+		timeout = 60 * time.Minute
 	}
 
 	var noOutput time.Duration
@@ -136,7 +130,130 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		}
 	}
 
+	// Parse optional flags
+	streamOutput := false
+	if input.StreamOutput != nil {
+		streamOutput = *input.StreamOutput
+	}
+
+	debug := false
+	if input.Debug != nil {
+		debug = *input.Debug
+	}
+
+	// Initialize logger (writes to stderr to avoid interfering with stdio MCP transport)
+	var logger *slog.Logger
+	if debug {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		logger = logger.With("tool", "codex")
+	}
+
+	// Get progress token from request
+	var progressToken any
+	if req != nil && req.Params != nil {
+		progressToken = req.Params.GetProgressToken()
+	}
+
+	// Output line counter for progress reporting
+	var outputLines atomic.Int64
+
+	// Set up buffered channel for async stream handling (prevents blocking stdout parsing)
+	var streamCh chan codex.StreamEvent
+	var streamDone chan struct{}
+	if streamOutput && req != nil && req.Session != nil {
+		streamCh = make(chan codex.StreamEvent, 128) // Buffered to prevent backpressure
+		streamDone = make(chan struct{})
+
+		go func() {
+			defer close(streamDone)
+			for evt := range streamCh {
+				text := evt.AgentMessage
+				if text == "" && !evt.IsJSON {
+					text = evt.RawLine
+				}
+				if text != "" {
+					if err := req.Session.Log(ctx, &mcp.LoggingMessageParams{
+						Level:  "info",
+						Logger: "codex",
+						Data:   text,
+					}); err != nil && logger != nil {
+						logger.Debug("stream log failed", "error", err)
+					}
+				}
+			}
+		}()
+	}
+
+	// Set up stream handler
+	var streamHandler codex.StreamHandler
+	if streamOutput || progressToken != nil {
+		streamHandler = func(evt codex.StreamEvent) {
+			outputLines.Add(1)
+
+			// Non-blocking send to stream channel
+			if streamCh != nil {
+				select {
+				case streamCh <- evt:
+				default:
+					// Channel full, drop event (prevents blocking)
+					if logger != nil {
+						logger.Debug("stream output dropped (buffer full)")
+					}
+				}
+			}
+		}
+	}
+
+	// Set up progress notification goroutine
+	var progressStop chan struct{}
+	var progressDone chan struct{}
+	if progressToken != nil && req != nil && req.Session != nil {
+		progressStop = make(chan struct{})
+		progressDone = make(chan struct{})
+
+		go func() {
+			defer close(progressDone)
+
+			const progressInterval = 5 * time.Second
+			ticker := time.NewTicker(progressInterval)
+			defer ticker.Stop()
+
+			start := time.Now()
+			progress := 0.0
+
+			sendProgress := func(message string) {
+				progress++
+				if err := req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+					ProgressToken: progressToken,
+					Progress:      progress,
+					Total:         0, // Unknown total
+					Message:       message,
+				}); err != nil && logger != nil {
+					logger.Debug("progress notification failed", "error", err)
+				}
+			}
+
+			sendProgress("codex started")
+
+			for {
+				select {
+				case <-ticker.C:
+					elapsed := time.Since(start).Truncate(time.Second)
+					lines := outputLines.Load()
+					sendProgress(fmt.Sprintf("codex running (%s elapsed, %d lines)", elapsed, lines))
+				case <-progressStop:
+					elapsed := time.Since(start).Truncate(time.Second)
+					sendProgress(fmt.Sprintf("codex completed (%s elapsed)", elapsed))
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	// Create options for codex client
+	// Note: Model and Profile are intentionally omitted to use user's default config from ~/.codex/config.toml
 	opts := codex.Options{
 		Prompt:            input.PROMPT,
 		WorkingDir:        input.Cd,
@@ -145,15 +262,40 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		SkipGitRepoCheck:  skipGitRepoCheck,
 		ReturnAllMessages: input.ReturnAllMessages,
 		ImagePaths:        input.Image,
-		Model:             input.Model,
 		Yolo:              yolo,
-		Profile:           input.Profile,
 		Timeout:           timeout,
 		NoOutputTimeout:   noOutput,
+		StreamHandler:     streamHandler,
+		Logger:            logger,
+		Debug:             debug,
 	}
 
 	// Execute codex
 	result, err := codex.Run(ctx, opts)
+
+	// Cleanup: stop progress notification (send final message before stopping)
+	if progressStop != nil {
+		close(progressStop)
+		select {
+		case <-progressDone:
+		case <-time.After(2 * time.Second):
+			if logger != nil {
+				logger.Debug("progress notification cleanup timeout")
+			}
+		}
+	}
+
+	// Cleanup: close stream channel and wait for flush
+	if streamCh != nil {
+		close(streamCh)
+		select {
+		case <-streamDone:
+		case <-time.After(2 * time.Second):
+			if logger != nil {
+				logger.Debug("stream output flush timeout")
+			}
+		}
+	}
 	if err != nil {
 		return nil, CodexOutput{}, fmt.Errorf("failed to execute codex: %v", err)
 	}

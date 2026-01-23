@@ -243,19 +243,11 @@ drainLoop:
 				}
 			}
 
-			// Check for errors
-			if lineType, ok := lineData["type"].(string); ok {
-				if strings.Contains(lineType, "fail") || strings.Contains(lineType, "error") {
-					result.Success = false
-					if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
-						if msg, ok := errMsg["message"].(string); ok {
-							result.Error = "codex error: " + msg
-						}
-					} else if msg, ok := lineData["message"].(string); ok {
-						result.Error = "codex error: " + msg
-					}
-				}
-			}
+			// Note: We don't check for intermediate errors here because Codex has
+			// a retry mechanism (up to 5 reconnection attempts on network issues).
+			// Setting Success=false on first error would incorrectly fail the whole
+			// operation. Instead, we judge success at the end based on whether we
+			// got valid SessionID and AgentMessages.
 		case readErr, ok := <-readErrCh:
 			if !ok {
 				readErrCh = nil

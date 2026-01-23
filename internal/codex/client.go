@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	defaultCommandTimeout  = 30 * time.Minute
-	maxCommandTimeout      = 30 * time.Minute
+	defaultCommandTimeout  = 60 * time.Minute
+	maxCommandTimeout      = 60 * time.Minute
 	defaultNoOutputTimeout = 0 // disabled by default
 	maxBufferedOutputLines = 100
 

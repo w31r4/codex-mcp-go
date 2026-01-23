@@ -18,12 +18,10 @@ type CodexInput struct {
 	Cd                string   `json:"cd" jsonschema:"Set the workspace root for codex before executing the task."`
 	Sandbox           string   `json:"sandbox,omitempty" jsonschema:"Sandbox policy for model-generated commands. Valid values: read-only (default) | workspace-write | danger-full-access."`
 	SessionID         string   `json:"SESSION_ID,omitempty" jsonschema:"Resume the specified session of the codex. Defaults to None, start a new session."`
-	SkipGitRepoCheck  *bool    `json:"skip_git_repo_check,omitempty" jsonschema:"Allow codex running outside a Git repository (useful for one-off directories)."`
+	SkipGitRepoCheck  *bool    `json:"skip_git_repo_check,omitempty" jsonschema:"Allow codex running outside a Git repository (useful for one-off directories). Defaults to true."`
 	ReturnAllMessages bool     `json:"return_all_messages,omitempty" jsonschema:"Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned."`
 	Image             []string `json:"image,omitempty" jsonschema:"Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag."`
-	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user."`
 	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Defaults to false to avoid unsafe execution."`
-	Profile           string   `json:"profile,omitempty" jsonschema:"Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user."`
 	TimeoutSeconds    *int     `json:"timeout_seconds,omitempty" jsonschema:"Total timeout (seconds) for the codex invocation. Defaults to 3600 (60 minutes) if not set; capped at 3600 (60 minutes)."`
 	NoOutputSeconds   *int     `json:"no_output_seconds,omitempty" jsonschema:"No-output watchdog (seconds). Kill the run if no output for this duration. Defaults to 0 (disabled) if not set."`
 }
@@ -108,14 +106,6 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		yolo = *input.Yolo
 	}
 
-	if input.Model != "" {
-		return nil, CodexOutput{}, fmt.Errorf("model parameter is prohibited; omit it or enable an explicit allowlist")
-	}
-
-	if input.Profile != "" {
-		return nil, CodexOutput{}, fmt.Errorf("profile parameter is prohibited; omit it or enable an explicit allowlist")
-	}
-
 	var timeout time.Duration
 	if input.TimeoutSeconds != nil && *input.TimeoutSeconds > 0 {
 		timeout = time.Duration(*input.TimeoutSeconds) * time.Second
@@ -137,6 +127,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	}
 
 	// Create options for codex client
+	// Note: Model and Profile are intentionally omitted to use user's default config from ~/.codex/config.toml
 	opts := codex.Options{
 		Prompt:            input.PROMPT,
 		WorkingDir:        input.Cd,
@@ -145,9 +136,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		SkipGitRepoCheck:  skipGitRepoCheck,
 		ReturnAllMessages: input.ReturnAllMessages,
 		ImagePaths:        input.Image,
-		Model:             input.Model,
 		Yolo:              yolo,
-		Profile:           input.Profile,
 		Timeout:           timeout,
 		NoOutputTimeout:   noOutput,
 	}

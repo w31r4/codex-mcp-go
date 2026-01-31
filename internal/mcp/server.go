@@ -2,13 +2,14 @@ package mcp
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/w31r4/codex-mcp-go/internal/codex"
+	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -142,20 +143,24 @@ Edge Cases & Best Practices:
 func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexInput) (*mcp.CallToolResult, CodexOutput, error) {
 	// Validate required parameters
 	if input.PROMPT == "" {
-		return nil, CodexOutput{}, fmt.Errorf("PROMPT is required and must be a string")
+		return nil, CodexOutput{}, cerrors.ErrInvalidParams("PROMPT is required and must be a non-empty string")
 	}
 
 	if input.Cd == "" {
-		return nil, CodexOutput{}, fmt.Errorf("cd is required and must be a string")
+		return nil, CodexOutput{}, cerrors.ErrInvalidParams("cd is required and must be a non-empty string")
 	}
 
 	// Validate working directory exists
 	info, err := os.Stat(input.Cd)
 	if err != nil {
-		return nil, CodexOutput{}, fmt.Errorf("working directory does not exist: %s", input.Cd)
+		if os.IsNotExist(err) {
+			return nil, CodexOutput{}, cerrors.ErrWorkdirNotFound(input.Cd)
+		}
+		return nil, CodexOutput{}, cerrors.Wrap(cerrors.InternalError, "failed to stat working directory", err).
+			WithData("path", input.Cd)
 	}
 	if !info.IsDir() {
-		return nil, CodexOutput{}, fmt.Errorf("working directory is not a directory: %s", input.Cd)
+		return nil, CodexOutput{}, cerrors.ErrWorkdirNotDirectory(input.Cd)
 	}
 
 	// Set defaults
@@ -174,11 +179,11 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	}
 
 	if input.Model != "" {
-		return nil, CodexOutput{}, fmt.Errorf("model parameter is prohibited; omit it or enable an explicit allowlist")
+		return nil, CodexOutput{}, cerrors.ErrParameterProhibited("model", "model selection is disabled by server policy")
 	}
 
 	if input.Profile != "" {
-		return nil, CodexOutput{}, fmt.Errorf("profile parameter is prohibited; omit it or enable an explicit allowlist")
+		return nil, CodexOutput{}, cerrors.ErrParameterProhibited("profile", "profile selection is disabled by server policy")
 	}
 
 	var timeout time.Duration
@@ -197,7 +202,11 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	// Validate image files exist
 	for _, imgPath := range input.Image {
 		if _, err := os.Stat(imgPath); err != nil {
-			return nil, CodexOutput{}, fmt.Errorf("image file does not exist: %s", imgPath)
+			if os.IsNotExist(err) {
+				return nil, CodexOutput{}, cerrors.ErrImageNotFound(imgPath)
+			}
+			return nil, CodexOutput{}, cerrors.Wrap(cerrors.InternalError, "failed to stat image file", err).
+				WithData("path", imgPath)
 		}
 	}
 
@@ -220,12 +229,19 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	// Execute codex
 	result, err := codex.Run(ctx, opts)
 	if err != nil {
-		return nil, CodexOutput{}, fmt.Errorf("failed to execute codex: %v", err)
+		var cerr *cerrors.Error
+		if errors.As(err, &cerr) {
+			return nil, CodexOutput{}, cerr
+		}
+		return nil, CodexOutput{}, cerrors.ErrCodexExecutionFailed("failed to execute codex", err)
 	}
 
 	// Check if execution was successful
 	if !result.Success {
-		return nil, CodexOutput{}, fmt.Errorf("%s", result.Error)
+		if result.Error == "" {
+			return nil, CodexOutput{}, cerrors.New(cerrors.CodexExecutionFailed, "codex execution failed")
+		}
+		return nil, CodexOutput{}, cerrors.New(cerrors.CodexExecutionFailed, result.Error)
 	}
 
 	// Prepare the response

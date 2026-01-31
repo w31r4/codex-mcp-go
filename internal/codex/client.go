@@ -6,12 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os/exec"
 	"runtime"
 	"strings"
 	"time"
+
+	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
 )
 
 const (
@@ -91,12 +92,12 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		sandbox = SandboxReadOnly
 	}
 	if !IsValidSandbox(sandbox) {
-		return nil, fmt.Errorf("invalid sandbox mode %q: must be one of %v", sandbox, ValidSandboxModes)
+		return nil, cerrors.ErrInvalidSandboxMode(sandbox, ValidSandboxModes)
 	}
 
 	codexPath, lookErr := exec.LookPath("codex")
 	if lookErr != nil {
-		return nil, fmt.Errorf("codex executable not found in PATH: %w", lookErr)
+		return nil, cerrors.ErrCodexNotFound(lookErr)
 	}
 
 	// Build the base command
@@ -130,14 +131,14 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	// Capture stdout and stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		return nil, cerrors.ErrCodexExecutionFailed("failed to create stdout pipe", err)
 	}
 	// Combine stderr into stdout so we surface all messages
 	cmd.Stderr = cmd.Stdout
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start codex command: %w", err)
+		return nil, cerrors.ErrCodexExecutionFailed("failed to start codex command", err)
 	}
 
 	// Parse the output
@@ -145,6 +146,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		Success:     true,
 		AllMessages: make([]map[string]interface{}, 0),
 	}
+	var runErr *cerrors.Error
 
 	agentMessages := make([]string, 0)
 	recentLines := make([]string, 0)
@@ -219,7 +221,11 @@ drainLoop:
 			if err := json.Unmarshal(trimmed, &lineData); err != nil {
 				result.Success = false
 				if result.Error == "" {
-					result.Error = fmt.Sprintf("JSON parse error: %v. Line: %s", err, string(trimmed))
+					result.Error = "failed to parse codex output as JSON"
+				}
+				if runErr == nil {
+					runErr = cerrors.ErrCodexExecutionFailed(result.Error, err).
+						WithData("line", string(trimmed))
 				}
 				continue
 			}
@@ -250,9 +256,15 @@ drainLoop:
 					if errMsg, ok := lineData["error"].(map[string]interface{}); ok {
 						if msg, ok := errMsg["message"].(string); ok {
 							result.Error = "codex error: " + msg
+							if runErr == nil {
+								runErr = cerrors.New(cerrors.CodexExecutionFailed, result.Error)
+							}
 						}
 					} else if msg, ok := lineData["message"].(string); ok {
 						result.Error = "codex error: " + msg
+						if runErr == nil {
+							runErr = cerrors.New(cerrors.CodexExecutionFailed, result.Error)
+						}
 					}
 				}
 			}
@@ -264,17 +276,21 @@ drainLoop:
 			if readErr != nil {
 				result.Success = false
 				if result.Error == "" {
-					result.Error = fmt.Sprintf("failed to read codex output: %v", readErr)
+					result.Error = "failed to read codex output"
+				}
+				if runErr == nil {
+					runErr = cerrors.ErrCodexExecutionFailed(result.Error, readErr)
 				}
 			}
 			readErrCh = nil
 		case <-noOutputCh:
 			result.Success = false
 			if result.Error == "" {
-				result.Error = fmt.Sprintf("no output from codex for %s (last output at %s)", opts.NoOutputTimeout, lastOutput.Format(time.RFC3339))
-				if len(recentLines) > 0 {
-					result.Error += "\nrecent output:\n" + strings.Join(recentLines, "\n")
-				}
+				result.Error = "no output from codex"
+			}
+			if runErr == nil {
+				runErr = cerrors.ErrNoOutputTimeout(opts.NoOutputTimeout).
+					WithData("last_output_at", lastOutput.Format(time.RFC3339))
 			}
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
@@ -283,7 +299,14 @@ drainLoop:
 		case <-ctx.Done():
 			result.Success = false
 			if result.Error == "" {
-				result.Error = fmt.Sprintf("codex command context canceled: %v", ctx.Err())
+				result.Error = "codex execution canceled"
+			}
+			if runErr == nil {
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					runErr = cerrors.ErrCodexTimeout(opts.Timeout)
+				} else {
+					runErr = cerrors.ErrCodexExecutionFailed(result.Error, ctx.Err())
+				}
 			}
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
@@ -297,14 +320,16 @@ drainLoop:
 	// Wait for command to finish
 	if err := cmd.Wait(); err != nil {
 		result.Success = false
-		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			if result.Error == "" {
-				result.Error = fmt.Sprintf("codex command canceled: %v", ctx.Err())
-			}
-		} else if result.Error == "" {
-			result.Error = fmt.Sprintf("codex command failed: %v", err)
-			if len(recentLines) > 0 {
-				result.Error += "\nrecent output:\n" + strings.Join(recentLines, "\n")
+		if result.Error == "" {
+			result.Error = "codex command failed"
+		}
+		if runErr == nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				runErr = cerrors.ErrCodexTimeout(opts.Timeout)
+			} else if errors.Is(ctx.Err(), context.Canceled) {
+				runErr = cerrors.ErrCodexExecutionFailed("codex execution canceled", ctx.Err())
+			} else {
+				runErr = cerrors.ErrCodexExecutionFailed(result.Error, err)
 			}
 		}
 	}
@@ -312,14 +337,30 @@ drainLoop:
 	// Post-process validation
 	if result.SessionID == "" {
 		result.Success = false
-		result.Error = "Failed to get SESSION_ID from the codex session. \n\n" + result.Error
+		if result.Error == "" {
+			result.Error = "failed to get SESSION_ID from the codex session"
+		}
+		if runErr == nil {
+			runErr = cerrors.New(cerrors.CodexExecutionFailed, result.Error)
+		}
 	}
 
 	if result.AgentMessages == "" {
 		result.Success = false
-		result.Error = "Failed to get agent_messages from the codex session. \n\n You can try to set return_all_messages to true to get the full reasoning information. \n\n " + result.Error
+		if result.Error == "" {
+			result.Error = "failed to get agent_messages from the codex session"
+		}
+		if runErr == nil {
+			runErr = cerrors.New(cerrors.CodexExecutionFailed, result.Error)
+		}
 	}
 
+	if runErr != nil {
+		if len(recentLines) > 0 {
+			runErr.WithData("recent_output", recentLines)
+		}
+		return result, runErr
+	}
 	return result, nil
 }
 

@@ -48,3 +48,5 @@ scripts/
 backup/
 .prettierrc
 plans/
+openspec/
+AGENTS.md

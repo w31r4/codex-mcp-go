@@ -1,6 +1,12 @@
 package codex
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+
+	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
+)
 
 func TestIsValidSandbox(t *testing.T) {
 	tests := []struct {
@@ -51,5 +57,46 @@ func TestSandboxConstants(t *testing.T) {
 	}
 	if SandboxDangerFullAccess != "danger-full-access" {
 		t.Errorf("SandboxDangerFullAccess = %q, want %q", SandboxDangerFullAccess, "danger-full-access")
+	}
+}
+
+func TestRun_InvalidSandbox_ReturnsStructuredError(t *testing.T) {
+	_, err := Run(context.Background(), Options{
+		Prompt:     "hi",
+		WorkingDir: ".",
+		Sandbox:    "network-only",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var cerr *cerrors.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected structured error, got %T: %v", err, err)
+	}
+	if cerr.Code != cerrors.InvalidSandboxMode {
+		t.Fatalf("code=%v, want %v", cerr.Code, cerrors.InvalidSandboxMode)
+	}
+	if cerr.Data["provided"] != "network-only" {
+		t.Fatalf("data.provided=%v, want %v", cerr.Data["provided"], "network-only")
+	}
+}
+
+func TestRun_CodexNotFound_ReturnsStructuredError(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	_, err := Run(context.Background(), Options{
+		Prompt:     "hi",
+		WorkingDir: ".",
+		Sandbox:    SandboxReadOnly,
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var cerr *cerrors.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected structured error, got %T: %v", err, err)
+	}
+	if cerr.Code != cerrors.CodexNotFound {
+		t.Fatalf("code=%v, want %v", cerr.Code, cerrors.CodexNotFound)
 	}
 }

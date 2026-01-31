@@ -7,12 +7,12 @@
     "url": "https://github.com/w31r4/codex-mcp-go",
     "source": "github"
   },
-  "version": "0.0.8",
+  "version": "0.0.9",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@zenfun510/codex-mcp-go",
-      "version": "0.0.8",
+      "version": "0.0.9",
       "transport": {
         "type": "stdio"
       }

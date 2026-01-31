@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/w31r4/codex-mcp-go/internal/codex"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -36,14 +37,77 @@ type CodexOutput struct {
 	AllMessages   []map[string]interface{} `json:"all_messages,omitempty"`
 }
 
+// buildInputSchema creates an explicit JSON Schema for CodexInput.
+// This ensures all fields have explicit "type" fields, which is required
+// by providers like Gemini/Vertex AI that strictly validate function declarations.
+func buildInputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"PROMPT": {
+				Type:        "string",
+				Description: "Instruction for the task to send to codex.",
+			},
+			"cd": {
+				Type:        "string",
+				Description: "Set the workspace root for codex before executing the task.",
+			},
+			"sandbox": {
+				Type:        "string",
+				Description: "Sandbox policy for model-generated commands. Valid values: read-only (default), workspace-write, danger-full-access.",
+				Enum:        []any{"read-only", "workspace-write", "danger-full-access"},
+			},
+			"SESSION_ID": {
+				Type:        "string",
+				Description: "Resume the specified session of the codex. Defaults to None, start a new session.",
+			},
+			"skip_git_repo_check": {
+				Type:        "boolean",
+				Description: "Allow codex running outside a Git repository (useful for one-off directories).",
+			},
+			"return_all_messages": {
+				Type:        "boolean",
+				Description: "Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned.",
+			},
+			"image": {
+				Type:        "array",
+				Description: "Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag.",
+				Items:       &jsonschema.Schema{Type: "string"},
+			},
+			"model": {
+				Type:        "string",
+				Description: "The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user.",
+			},
+			"yolo": {
+				Type:        "boolean",
+				Description: "Run every command without approvals or sandboxing. Defaults to false to avoid unsafe execution.",
+			},
+			"profile": {
+				Type:        "string",
+				Description: "Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user.",
+			},
+			"timeout_seconds": {
+				Type:        "number",
+				Description: "Total timeout (seconds) for the codex invocation. Defaults to 1800 (30 minutes) if not set; capped at 1800 (30 minutes).",
+			},
+			"no_output_seconds": {
+				Type:        "number",
+				Description: "No-output watchdog (seconds). Kill the run if no output for this duration. Defaults to 0 (disabled) if not set.",
+			},
+		},
+		Required: []string{"PROMPT", "cd"},
+	}
+}
+
 // NewServer creates and configures a new MCP server with the codex tool
 func NewServer() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    "Codex MCP Server-from guda.studio",
-		Version: "0.0.8",
+		Version: "0.0.9",
 	}, nil)
 
-	// Define the codex tool
+	// Define the codex tool with explicit InputSchema
+	// This ensures compatibility with strict schema validators like Gemini/Vertex AI
 	tool := &mcp.Tool{
 		Name: "codex",
 		Description: `Executes a non-interactive Codex session via CLI to perform AI-assisted coding tasks in a secure workspace.
@@ -61,8 +125,9 @@ Edge Cases & Best Practices:
 - Defaults to "read-only" sandbox. Valid sandbox values: read-only, workspace-write, danger-full-access.
 - Disables "yolo" (auto-confirmation) by default; enable write/yolo explicitly if your workflow requires it.
 - If needed, set 'return_all_messages' to True to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).`,
+		InputSchema: buildInputSchema(),
 		Meta: mcp.Meta{
-			"version": "0.0.8",
+			"version": "0.0.9",
 			"author":  "guda.studio",
 		},
 	}

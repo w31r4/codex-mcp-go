@@ -171,7 +171,7 @@ Edge Cases & Best Practices:
 }
 
 // handleCodexTool processes the codex tool call
-func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexInput) (result *mcp.CallToolResult, output CodexOutput, err error) {
+func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexInput) (callResult *mcp.CallToolResult, out CodexOutput, err error) {
 	ctx, rc := logging.NewRequestContext(ctx, "codex")
 	logging.LogRequest(ctx, map[string]any{
 		"cd":                  input.Cd,
@@ -182,7 +182,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		"return_all_messages": input.ReturnAllMessages,
 	})
 	defer func() {
-		success := err == nil && output.Success
+		success := err == nil && out.Success
 		globalMetrics.RecordRequest("codex", success, time.Since(rc.StartTime))
 		if err != nil {
 			var cerr *cerrors.Error
@@ -192,7 +192,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		}
 		logging.LogResponse(ctx, map[string]any{
 			"success":    success,
-			"session_id": output.SessionID,
+			"session_id": out.SessionID,
 		}, err)
 	}()
 
@@ -282,35 +282,35 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	}
 
 	// Execute codex
-	result, err := codex.Run(ctx, opts)
-	if err != nil {
+	codexResult, runErr := codex.Run(ctx, opts)
+	if runErr != nil {
 		var cerr *cerrors.Error
-		if errors.As(err, &cerr) {
+		if errors.As(runErr, &cerr) {
 			return nil, CodexOutput{}, cerr
 		}
-		return nil, CodexOutput{}, cerrors.ErrCodexExecutionFailed("failed to execute codex", err)
+		return nil, CodexOutput{}, cerrors.ErrCodexExecutionFailed("failed to execute codex", runErr)
 	}
 
 	// Check if execution was successful
-	if !result.Success {
-		if result.Error == "" {
+	if !codexResult.Success {
+		if codexResult.Error == "" {
 			return nil, CodexOutput{}, cerrors.New(cerrors.CodexExecutionFailed, "codex execution failed")
 		}
-		return nil, CodexOutput{}, cerrors.New(cerrors.CodexExecutionFailed, result.Error)
+		return nil, CodexOutput{}, cerrors.New(cerrors.CodexExecutionFailed, codexResult.Error)
 	}
 
 	// Prepare the response
-	output := CodexOutput{
+	out = CodexOutput{
 		Success:       true,
-		SessionID:     result.SessionID,
-		AgentMessages: result.AgentMessages,
+		SessionID:     codexResult.SessionID,
+		AgentMessages: codexResult.AgentMessages,
 	}
 
 	if input.ReturnAllMessages {
-		output.AllMessages = result.AllMessages
+		out.AllMessages = codexResult.AllMessages
 	}
 
-	return nil, output, nil
+	return nil, out, nil
 }
 
 func handleStats(ctx context.Context, req *mcp.CallToolRequest, input StatsInput) (result *mcp.CallToolResult, output StatsOutput, err error) {

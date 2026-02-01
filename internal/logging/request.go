@@ -53,7 +53,7 @@ func LogResponse(ctx context.Context, output any, err error) {
 		rc.Logger.Error("tool request failed", "error", err.Error(), "duration_ms", duration)
 		return
 	}
-	rc.Logger.Info("tool request completed", "duration_ms", duration)
+	rc.Logger.Info("tool request completed", "duration_ms", duration, "output", output)
 }
 
 func newRequestID() string {

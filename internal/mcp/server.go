@@ -10,8 +10,15 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/w31r4/codex-mcp-go/internal/codex"
 	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
+	"github.com/w31r4/codex-mcp-go/internal/logging"
+	"github.com/w31r4/codex-mcp-go/internal/metrics"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+var (
+	serverStartTime = time.Now()
+	globalMetrics   = metrics.New()
 )
 
 // CodexInput represents the input parameters for the codex tool
@@ -36,6 +43,13 @@ type CodexOutput struct {
 	SessionID     string                   `json:"SESSION_ID"`
 	AgentMessages string                   `json:"agent_messages"`
 	AllMessages   []map[string]interface{} `json:"all_messages,omitempty"`
+}
+
+type StatsInput struct{}
+
+type StatsOutput struct {
+	Uptime  string           `json:"uptime"`
+	Metrics metrics.Snapshot `json:"metrics"`
 }
 
 // buildInputSchema creates an explicit JSON Schema for CodexInput.
@@ -100,6 +114,13 @@ func buildInputSchema() *jsonschema.Schema {
 	}
 }
 
+func buildStatsInputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:       "object",
+		Properties: map[string]*jsonschema.Schema{},
+	}
+}
+
 // NewServer creates and configures a new MCP server with the codex tool
 func NewServer() *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{
@@ -136,11 +157,45 @@ Edge Cases & Best Practices:
 	// Add the tool handler
 	mcp.AddTool(s, tool, handleCodexTool)
 
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "stats",
+		Title:       "Server Stats",
+		Description: "Returns server uptime and aggregate request metrics.",
+		InputSchema: buildStatsInputSchema(),
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	}, handleStats)
+
 	return s
 }
 
 // handleCodexTool processes the codex tool call
-func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexInput) (*mcp.CallToolResult, CodexOutput, error) {
+func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexInput) (result *mcp.CallToolResult, output CodexOutput, err error) {
+	ctx, rc := logging.NewRequestContext(ctx, "codex")
+	logging.LogRequest(ctx, map[string]any{
+		"cd":                  input.Cd,
+		"sandbox":             input.Sandbox,
+		"session_id":          strings.TrimSpace(input.SessionID),
+		"prompt_chars":        len(input.PROMPT),
+		"image_count":         len(input.Image),
+		"return_all_messages": input.ReturnAllMessages,
+	})
+	defer func() {
+		success := err == nil && output.Success
+		globalMetrics.RecordRequest("codex", success, time.Since(rc.StartTime))
+		if err != nil {
+			var cerr *cerrors.Error
+			if errors.As(err, &cerr) {
+				globalMetrics.RecordError(cerr.Code.Name())
+			}
+		}
+		logging.LogResponse(ctx, map[string]any{
+			"success":    success,
+			"session_id": output.SessionID,
+		}, err)
+	}()
+
 	// Validate required parameters
 	if input.PROMPT == "" {
 		return nil, CodexOutput{}, cerrors.ErrInvalidParams("PROMPT is required and must be a non-empty string")
@@ -255,6 +310,28 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		output.AllMessages = result.AllMessages
 	}
 
+	return nil, output, nil
+}
+
+func handleStats(ctx context.Context, req *mcp.CallToolRequest, input StatsInput) (result *mcp.CallToolResult, output StatsOutput, err error) {
+	ctx, rc := logging.NewRequestContext(ctx, "stats")
+	logging.LogRequest(ctx, map[string]any{})
+	defer func() {
+		success := err == nil
+		globalMetrics.RecordRequest("stats", success, time.Since(rc.StartTime))
+		if err != nil {
+			var cerr *cerrors.Error
+			if errors.As(err, &cerr) {
+				globalMetrics.RecordError(cerr.Code.Name())
+			}
+		}
+		logging.LogResponse(ctx, map[string]any{"success": success}, err)
+	}()
+
+	output = StatsOutput{
+		Uptime:  time.Since(serverStartTime).String(),
+		Metrics: globalMetrics.Snapshot(),
+	}
 	return nil, output, nil
 }
 

@@ -176,8 +176,18 @@ func NewServer(cfg *config.Config) *mcp.Server {
 
 	// Define the codex tool with explicit InputSchema
 	// This ensures compatibility with strict schema validators like Gemini/Vertex AI
+	codexDestructive := true
+	codexOpenWorld := true
 	tool := &mcp.Tool{
 		Name: "codex",
+		Title: "Codex",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &codexDestructive,
+			IdempotentHint:  false,
+			OpenWorldHint:   &codexOpenWorld,
+			Title:           "Codex",
+		},
 		Description: `Executes a non-interactive Codex session via CLI to perform AI-assisted coding tasks in a secure workspace.
 This tool wraps the 'codex exec' command, enabling model-driven code generation, debugging, or automation based on natural language prompts.
 It supports resuming ongoing sessions for continuity and enforces sandbox policies to prevent unsafe operations. Ideal for integrating Codex into MCP servers for agentic workflows, such as code reviews or repo modifications.

@@ -41,10 +41,12 @@ type CodexInput struct {
 
 // CodexOutput represents the output from the codex tool
 type CodexOutput struct {
-	Success       bool                     `json:"success"`
-	SessionID     string                   `json:"SESSION_ID"`
-	AgentMessages string                   `json:"agent_messages"`
-	AllMessages   []map[string]interface{} `json:"all_messages,omitempty"`
+	Success         bool                     `json:"success"`
+	SessionID       string                   `json:"SESSION_ID"`
+	AgentMessages   string                   `json:"agent_messages"`
+	AllMessages     []map[string]interface{} `json:"all_messages,omitempty"`
+	ExecutionTimeMs int64                    `json:"execution_time_ms"`
+	ToolCallCount   int                      `json:"tool_call_count"`
 }
 
 type StatsInput struct{}
@@ -116,6 +118,40 @@ func buildInputSchema() *jsonschema.Schema {
 	}
 }
 
+func buildOutputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"success": {
+				Type:        "boolean",
+				Description: "Whether the Codex invocation succeeded.",
+			},
+			"SESSION_ID": {
+				Type:        "string",
+				Description: "Codex session/thread identifier (thread_id).",
+			},
+			"agent_messages": {
+				Type:        "string",
+				Description: "The agent's final reply text (may contain multiple lines).",
+			},
+			"all_messages": {
+				Type:        "array",
+				Description: "Raw Codex CLI JSONL lines. Present only when return_all_messages=true.",
+				Items:       &jsonschema.Schema{Type: "object"},
+			},
+			"execution_time_ms": {
+				Type:        "number",
+				Description: "Execution time for the Codex CLI invocation, in milliseconds.",
+			},
+			"tool_call_count": {
+				Type:        "number",
+				Description: "Best-effort count of tool calls observed in Codex JSONL output.",
+			},
+		},
+		Required: []string{"success", "SESSION_ID", "agent_messages"},
+	}
+}
+
 func buildStatsInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:       "object",
@@ -155,6 +191,7 @@ Edge Cases & Best Practices:
 - Disables "yolo" (auto-confirmation) by default; enable write/yolo explicitly if your workflow requires it.
 - If needed, set 'return_all_messages' to True to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).`,
 		InputSchema: buildInputSchema(),
+		OutputSchema: buildOutputSchema(),
 		Meta: mcp.Meta{
 			"version": "0.0.9",
 			"author":  "guda.studio",
@@ -329,7 +366,9 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	}
 
 	// Execute codex
+	runStart := time.Now()
 	codexResult, runErr := codex.Run(ctx, opts)
+	runDuration := time.Since(runStart)
 	if runErr != nil {
 		var cerr *cerrors.Error
 		if errors.As(runErr, &cerr) {
@@ -348,16 +387,23 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 
 	// Prepare the response
 	out = CodexOutput{
-		Success:       true,
-		SessionID:     codexResult.SessionID,
-		AgentMessages: codexResult.AgentMessages,
+		Success:         true,
+		SessionID:       codexResult.SessionID,
+		AgentMessages:   codexResult.AgentMessages,
+		ExecutionTimeMs: runDuration.Milliseconds(),
+		ToolCallCount:   codexResult.ToolCallCount,
 	}
 
 	if input.ReturnAllMessages {
 		out.AllMessages = codexResult.AllMessages
 	}
 
-	return nil, out, nil
+	callResult = &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: codexResult.AgentMessages},
+		},
+	}
+	return callResult, out, nil
 }
 
 func handleStats(ctx context.Context, req *mcp.CallToolRequest, input StatsInput) (result *mcp.CallToolResult, output StatsOutput, err error) {

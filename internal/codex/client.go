@@ -64,6 +64,7 @@ type Result struct {
 	SessionID     string
 	AgentMessages string
 	AllMessages   []map[string]interface{}
+	ToolCallCount int
 	Error         string
 }
 
@@ -243,6 +244,16 @@ drainLoop:
 			// Collect all messages if requested
 			if opts.ReturnAllMessages {
 				result.AllMessages = append(result.AllMessages, lineData)
+			}
+
+			// Best-effort tool call counting (independent of opts.ReturnAllMessages).
+			if item, ok := lineData["item"].(map[string]interface{}); ok {
+				if itemType, ok := item["type"].(string); ok {
+					switch itemType {
+					case "tool_call", "tool_use":
+						result.ToolCallCount++
+					}
+				}
 			}
 
 			// Extract thread_id

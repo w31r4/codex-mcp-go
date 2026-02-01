@@ -22,13 +22,13 @@ type Logger interface {
 
 type Config struct {
 	// Level: debug, info, warn, error
-	Level string
+	Level string `toml:"level"`
 	// Format: json, text
-	Format string
+	Format string `toml:"format"`
 	// Output: stdout, stderr, file
-	Output string
+	Output string `toml:"output"`
 	// FilePath is used when Output=file.
-	FilePath string
+	FilePath string `toml:"file_path"`
 }
 
 func DefaultConfig() Config {

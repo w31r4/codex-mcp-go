@@ -13,6 +13,7 @@ import (
 	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
 	"github.com/w31r4/codex-mcp-go/internal/logging"
 	"github.com/w31r4/codex-mcp-go/internal/metrics"
+	"github.com/w31r4/codex-mcp-go/internal/session"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -165,6 +166,7 @@ func NewServer(cfg *config.Config) *mcp.Server {
 		cfg = globalConfig
 	}
 	globalConfig = cfg
+	globalSessions = session.NewManager(session.DefaultOptions())
 
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    cfg.Server.Name,
@@ -210,6 +212,41 @@ Edge Cases & Best Practices:
 			ReadOnlyHint: true,
 		},
 	}, handleStats)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_sessions",
+		Title:       "List Sessions",
+		Description: "Lists running and recent Codex sessions tracked by the server.",
+		InputSchema: buildListSessionsInputSchema(),
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	}, handleListSessions)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_session",
+		Title:       "Get Session",
+		Description: "Returns session metadata and state for the given SESSION_ID.",
+		InputSchema: buildGetSessionInputSchema(),
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	}, handleGetSession)
+
+	destructive := true
+	openWorld := false
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "cancel_session",
+		Title:       "Cancel Session",
+		Description: "Cancels a running session identified by SESSION_ID.",
+		InputSchema: buildCancelSessionInputSchema(),
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &destructive,
+			IdempotentHint:  false,
+			OpenWorldHint:   &openWorld,
+		},
+	}, handleCancelSession)
 
 	return s
 }
@@ -365,11 +402,33 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		MaxBufferedLines:  cfg.Codex.MaxBufferedLines,
 	}
 
+	// Track this execution as a session.
+	trackingID := input.SessionID
+	if trackingID == "" {
+		trackingID = session.NewTemporaryID()
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if _, startErr := globalSessions.Start(trackingID, input.Cd, input.Sandbox, cancel); startErr != nil {
+		return nil, CodexOutput{}, startErr
+	}
+
 	// Execute codex
 	runStart := time.Now()
-	codexResult, runErr := codex.Run(ctx, opts)
+	codexResult, runErr := codex.Run(runCtx, opts)
 	runDuration := time.Since(runStart)
 	if runErr != nil {
+		// Best-effort: if this was a new session, update the temporary tracking ID to the real thread_id when known.
+		if input.SessionID == "" && codexResult != nil && strings.TrimSpace(codexResult.SessionID) != "" && codexResult.SessionID != trackingID {
+			if ok, updateErr := globalSessions.UpdateID(trackingID, codexResult.SessionID); updateErr == nil && ok {
+				trackingID = codexResult.SessionID
+			}
+		}
+		if errors.Is(runCtx.Err(), context.Canceled) {
+			globalSessions.MarkCancelled(trackingID, "cancelled")
+		} else {
+			globalSessions.MarkFailed(trackingID, runErr)
+		}
 		var cerr *cerrors.Error
 		if errors.As(runErr, &cerr) {
 			return nil, CodexOutput{}, cerr
@@ -377,13 +436,25 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		return nil, CodexOutput{}, cerrors.ErrCodexExecutionFailed("failed to execute codex", runErr)
 	}
 
+	// Best-effort: if this was a new session, update the temporary tracking ID to the real thread_id when known.
+	if input.SessionID == "" && codexResult != nil && strings.TrimSpace(codexResult.SessionID) != "" && codexResult.SessionID != trackingID {
+		if ok, updateErr := globalSessions.UpdateID(trackingID, codexResult.SessionID); updateErr == nil && ok {
+			trackingID = codexResult.SessionID
+		}
+	}
+
 	// Check if execution was successful
 	if !codexResult.Success {
-		if codexResult.Error == "" {
-			return nil, CodexOutput{}, cerrors.New(cerrors.CodexExecutionFailed, "codex execution failed")
+		msg := strings.TrimSpace(codexResult.Error)
+		if msg == "" {
+			msg = "codex execution failed"
 		}
-		return nil, CodexOutput{}, cerrors.New(cerrors.CodexExecutionFailed, codexResult.Error)
+		errOut := cerrors.New(cerrors.CodexExecutionFailed, msg)
+		globalSessions.MarkFailed(trackingID, errOut)
+		return nil, CodexOutput{}, errOut
 	}
+
+	globalSessions.MarkCompleted(trackingID, runDuration.Milliseconds(), codexResult.ToolCallCount)
 
 	// Prepare the response
 	out = CodexOutput{
@@ -431,5 +502,6 @@ func handleStats(ctx context.Context, req *mcp.CallToolRequest, input StatsInput
 // Run starts the MCP server over stdio transport.
 func Run(ctx context.Context, cfg *config.Config) error {
 	server := NewServer(cfg)
+	globalSessions.StartCleanup(ctx, time.Minute)
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

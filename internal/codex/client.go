@@ -13,6 +13,7 @@ import (
 	"time"
 
 	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
+	"github.com/w31r4/codex-mcp-go/internal/progress"
 )
 
 const (
@@ -56,6 +57,7 @@ type Options struct {
 	NoOutputTimeout   time.Duration
 	ExecutablePath    string
 	MaxBufferedLines  int
+	Reporter          progress.Reporter
 }
 
 // Result represents the parsed result from Codex CLI output
@@ -74,6 +76,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	reporter := opts.Reporter
+	if reporter == nil {
+		reporter = progress.Nop
+	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = defaultCommandTimeout
 	}
@@ -85,6 +91,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
+	reporter.Report(ctx, "initializing")
 
 	prompt := opts.Prompt
 	if runtime.GOOS == "windows" {
@@ -109,6 +116,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	// Build the base command
 	cmd := exec.CommandContext(ctx, codexPath, "exec", "--sandbox", sandbox, "--cd", opts.WorkingDir, "--json")
+	reporter.Report(ctx, "starting codex")
 
 	// Add optional flags
 	if len(opts.ImagePaths) > 0 {
@@ -147,6 +155,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, cerrors.ErrCodexExecutionFailed("failed to start codex command", err)
 	}
+	reporter.Report(ctx, "codex running")
 
 	// Parse the output
 	result := &Result{
@@ -210,6 +219,15 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}()
 
+	var progressTicker *time.Ticker
+	if reporter != progress.Nop {
+		progressTicker = time.NewTicker(5 * time.Second)
+		defer progressTicker.Stop()
+	}
+	reportedFirstOutput := false
+	reportedThreadID := false
+	reportedAgentMessage := false
+
 drainLoop:
 	for {
 		select {
@@ -221,6 +239,11 @@ drainLoop:
 			lastOutput = time.Now()
 			if len(trimmed) == 0 {
 				continue
+			}
+
+			if !reportedFirstOutput {
+				reportedFirstOutput = true
+				reporter.Report(ctx, "received output")
 			}
 
 			recentLines = append(recentLines, string(trimmed))
@@ -259,6 +282,10 @@ drainLoop:
 			// Extract thread_id
 			if threadID, ok := lineData["thread_id"].(string); ok && threadID != "" {
 				result.SessionID = threadID
+				if !reportedThreadID {
+					reportedThreadID = true
+					reporter.Report(ctx, "received SESSION_ID")
+				}
 			}
 
 			// Extract agent messages
@@ -266,6 +293,10 @@ drainLoop:
 				if itemType, ok := item["type"].(string); ok && itemType == "agent_message" {
 					if text, ok := item["text"].(string); ok {
 						agentMessages = append(agentMessages, text)
+						if !reportedAgentMessage {
+							reportedAgentMessage = true
+							reporter.Report(ctx, "received agent message")
+						}
 					}
 				}
 			}
@@ -333,10 +364,18 @@ drainLoop:
 				_ = cmd.Process.Kill()
 			}
 			break drainLoop
+		case <-func() <-chan time.Time {
+			if progressTicker == nil {
+				return nil
+			}
+			return progressTicker.C
+		}():
+			reporter.Report(ctx, "running")
 		}
 	}
 
 	result.AgentMessages = strings.Join(agentMessages, "\n")
+	reporter.Report(ctx, "finalizing")
 
 	// Wait for command to finish
 	if err := cmd.Wait(); err != nil {

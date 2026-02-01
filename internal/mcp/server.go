@@ -13,6 +13,7 @@ import (
 	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
 	"github.com/w31r4/codex-mcp-go/internal/logging"
 	"github.com/w31r4/codex-mcp-go/internal/metrics"
+	"github.com/w31r4/codex-mcp-go/internal/progress"
 	"github.com/w31r4/codex-mcp-go/internal/session"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -256,6 +257,12 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	cfg := globalConfig
 
 	ctx, rc := logging.NewRequestContext(ctx, "codex")
+	reporter := progress.Nop
+	if req != nil && req.Session != nil {
+		if token := req.Params.GetProgressToken(); token != nil {
+			reporter = progress.NewMCPReporter(req.Session, token)
+		}
+	}
 	logging.LogRequest(ctx, map[string]any{
 		"cd":                  input.Cd,
 		"sandbox":             input.Sandbox,
@@ -400,6 +407,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		NoOutputTimeout:   noOutput,
 		ExecutablePath:    cfg.Codex.ExecutablePath,
 		MaxBufferedLines:  cfg.Codex.MaxBufferedLines,
+		Reporter:          reporter,
 	}
 
 	// Track this execution as a session.

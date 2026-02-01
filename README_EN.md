@@ -170,6 +170,26 @@ EOF
 ```
 The MCP handshake requires `initialize` before `tools/list`. If the response contains the `codex` tool, it is working.
 
+### 5. (Optional) Server Configuration (File + Env)
+
+You can configure runtime policy via a **TOML config file** and/or **environment variables**. Precedence: defaults < config file < env vars.
+
+```bash
+./codex-mcp-go --config ./codex-mcp.example.toml
+# or
+CODEX_MCP_CONFIG=./codex-mcp.example.toml ./codex-mcp-go
+```
+
+Environment variables (override config file):
+- `CODEX_MCP_SERVER_NAME` / `CODEX_MCP_VERSION`
+- `CODEX_DEFAULT_TIMEOUT` / `CODEX_MAX_TIMEOUT` / `CODEX_NO_OUTPUT_TIMEOUT` (seconds)
+- `CODEX_MAX_BUFFERED_LINES` / `CODEX_EXECUTABLE_PATH`
+- `CODEX_ALLOWED_MODELS` / `CODEX_ALLOWED_PROFILES` (comma-separated; `*` allows any value; empty=deny all)
+- `CODEX_DEFAULT_SANDBOX` / `CODEX_ALLOWED_SANDBOX_MODES` (comma-separated)
+- `CODEX_ALLOWED_WORK_DIRS` (comma-separated directory prefixes; empty=allow all)
+- `CODEX_DISABLE_YOLO` (true/false)
+- `CODEX_LOG_LEVEL` / `CODEX_LOG_FORMAT` / `CODEX_LOG_OUTPUT` / `CODEX_LOG_FILE`
+
 ---
 
 ## Recommended System Prompts

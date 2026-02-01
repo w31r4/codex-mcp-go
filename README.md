@@ -198,6 +198,26 @@ EOF
 ```
 需先完成 `initialize` 握手，然后才能调用 `tools/list`。若返回包含 `codex` 工具的 JSON 数据，即表示运行正常。
 
+### 5.（可选）服务端配置（配置文件 + 环境变量）
+
+支持通过 **TOML 配置文件** 或 **环境变量** 调整运行策略。优先级：默认值 < 配置文件 < 环境变量。
+
+```bash
+./codex-mcp-go --config ./codex-mcp.example.toml
+# 或
+CODEX_MCP_CONFIG=./codex-mcp.example.toml ./codex-mcp-go
+```
+
+环境变量（会覆盖配置文件）：
+- `CODEX_MCP_SERVER_NAME` / `CODEX_MCP_VERSION`
+- `CODEX_DEFAULT_TIMEOUT` / `CODEX_MAX_TIMEOUT` / `CODEX_NO_OUTPUT_TIMEOUT`（单位：秒）
+- `CODEX_MAX_BUFFERED_LINES` / `CODEX_EXECUTABLE_PATH`
+- `CODEX_ALLOWED_MODELS` / `CODEX_ALLOWED_PROFILES`（逗号分隔；`*` 表示允许任意值；默认空=全部拒绝）
+- `CODEX_DEFAULT_SANDBOX` / `CODEX_ALLOWED_SANDBOX_MODES`（逗号分隔）
+- `CODEX_ALLOWED_WORK_DIRS`（逗号分隔的目录前缀列表；空=不限制）
+- `CODEX_DISABLE_YOLO`（true/false）
+- `CODEX_LOG_LEVEL` / `CODEX_LOG_FORMAT` / `CODEX_LOG_OUTPUT` / `CODEX_LOG_FILE`
+
 ---
 
 ## 推荐的系统提示词 (System Prompts)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/w31r4/codex-mcp-go/internal/codex"
+	"github.com/w31r4/codex-mcp-go/internal/config"
 	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
 	"github.com/w31r4/codex-mcp-go/internal/logging"
 	"github.com/w31r4/codex-mcp-go/internal/metrics"
@@ -19,6 +20,7 @@ import (
 var (
 	serverStartTime = time.Now()
 	globalMetrics   = metrics.New()
+	globalConfig    = config.Default()
 )
 
 // CodexInput represents the input parameters for the codex tool
@@ -30,9 +32,9 @@ type CodexInput struct {
 	SkipGitRepoCheck  *bool    `json:"skip_git_repo_check,omitempty" jsonschema:"Allow codex running outside a Git repository (useful for one-off directories)."`
 	ReturnAllMessages bool     `json:"return_all_messages,omitempty" jsonschema:"Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned."`
 	Image             []string `json:"image,omitempty" jsonschema:"Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag."`
-	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user."`
+	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is restricted by server allowlist (disabled by default)."`
 	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Defaults to false to avoid unsafe execution."`
-	Profile           string   `json:"profile,omitempty" jsonschema:"Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user."`
+	Profile           string   `json:"profile,omitempty" jsonschema:"Configuration profile name to load from '~/.codex/config.toml'. This parameter is restricted by server allowlist (disabled by default)."`
 	TimeoutSeconds    *int     `json:"timeout_seconds,omitempty" jsonschema:"Total timeout (seconds) for the codex invocation. Defaults to 1800 (30 minutes) if not set; capped at 1800 (30 minutes)."`
 	NoOutputSeconds   *int     `json:"no_output_seconds,omitempty" jsonschema:"No-output watchdog (seconds). Kill the run if no output for this duration. Defaults to 0 (disabled) if not set."`
 }
@@ -91,7 +93,7 @@ func buildInputSchema() *jsonschema.Schema {
 			},
 			"model": {
 				Type:        "string",
-				Description: "The model to use for the codex session. This parameter is strictly prohibited unless explicitly specified by the user.",
+				Description: "The model to use for the codex session. This parameter is restricted by server allowlist (disabled by default).",
 			},
 			"yolo": {
 				Type:        "boolean",
@@ -99,7 +101,7 @@ func buildInputSchema() *jsonschema.Schema {
 			},
 			"profile": {
 				Type:        "string",
-				Description: "Configuration profile name to load from '~/.codex/config.toml'. This parameter is strictly prohibited unless explicitly specified by the user.",
+				Description: "Configuration profile name to load from '~/.codex/config.toml'. This parameter is restricted by server allowlist (disabled by default).",
 			},
 			"timeout_seconds": {
 				Type:        "number",
@@ -122,10 +124,15 @@ func buildStatsInputSchema() *jsonschema.Schema {
 }
 
 // NewServer creates and configures a new MCP server with the codex tool
-func NewServer() *mcp.Server {
+func NewServer(cfg *config.Config) *mcp.Server {
+	if cfg == nil {
+		cfg = globalConfig
+	}
+	globalConfig = cfg
+
 	s := mcp.NewServer(&mcp.Implementation{
-		Name:    "Codex MCP Server-from guda.studio",
-		Version: "0.0.9",
+		Name:    cfg.Server.Name,
+		Version: cfg.Server.Version,
 	}, nil)
 
 	// Define the codex tool with explicit InputSchema
@@ -172,6 +179,8 @@ Edge Cases & Best Practices:
 
 // handleCodexTool processes the codex tool call
 func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexInput) (callResult *mcp.CallToolResult, out CodexOutput, err error) {
+	cfg := globalConfig
+
 	ctx, rc := logging.NewRequestContext(ctx, "codex")
 	logging.LogRequest(ctx, map[string]any{
 		"cd":                  input.Cd,
@@ -205,6 +214,11 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		return nil, CodexOutput{}, cerrors.ErrInvalidParams("cd is required and must be a non-empty string")
 	}
 
+	if cfg != nil && !cfg.Security.IsWorkDirAllowed(input.Cd) {
+		return nil, CodexOutput{}, cerrors.New(cerrors.InvalidParams, "working directory is not allowed").
+			WithData("path", input.Cd)
+	}
+
 	// Validate working directory exists
 	info, err := os.Stat(input.Cd)
 	if err != nil {
@@ -220,9 +234,18 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 
 	// Set defaults
 	if input.Sandbox == "" {
-		input.Sandbox = "read-only"
+		if cfg != nil {
+			input.Sandbox = cfg.Security.DefaultSandbox
+		} else {
+			input.Sandbox = "read-only"
+		}
 	}
 	input.SessionID = strings.TrimSpace(input.SessionID)
+
+	if cfg != nil && !cfg.Security.IsSandboxAllowed(input.Sandbox) {
+		return nil, CodexOutput{}, cerrors.ErrInvalidSandboxMode(input.Sandbox, cfg.Security.AllowedSandboxModes)
+	}
+
 	skipGitRepoCheck := true
 	if input.SkipGitRepoCheck != nil {
 		skipGitRepoCheck = *input.SkipGitRepoCheck
@@ -233,26 +256,48 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		yolo = *input.Yolo
 	}
 
+	if cfg != nil && cfg.Security.DisableYolo && yolo {
+		return nil, CodexOutput{}, cerrors.ErrParameterProhibited("yolo", "yolo is disabled by server policy")
+	}
+
 	if input.Model != "" {
-		return nil, CodexOutput{}, cerrors.ErrParameterProhibited("model", "model selection is disabled by server policy")
+		if cfg == nil || !cfg.Security.IsModelAllowed(input.Model) {
+			return nil, CodexOutput{}, cerrors.ErrParameterProhibited("model", "model is not allowlisted by server configuration")
+		}
 	}
 
 	if input.Profile != "" {
-		return nil, CodexOutput{}, cerrors.ErrParameterProhibited("profile", "profile selection is disabled by server policy")
+		if cfg == nil || !cfg.Security.IsProfileAllowed(input.Profile) {
+			return nil, CodexOutput{}, cerrors.ErrParameterProhibited("profile", "profile is not allowlisted by server configuration")
+		}
 	}
 
 	var timeout time.Duration
-	if input.TimeoutSeconds != nil && *input.TimeoutSeconds > 0 {
-		timeout = time.Duration(*input.TimeoutSeconds) * time.Second
+	timeoutSeconds := 0
+	if cfg != nil {
+		timeoutSeconds = cfg.Codex.DefaultTimeoutSeconds
 	}
-	if timeout > 30*time.Minute {
-		timeout = 30 * time.Minute
+	if input.TimeoutSeconds != nil && *input.TimeoutSeconds > 0 {
+		timeoutSeconds = *input.TimeoutSeconds
+	}
+	if cfg != nil && timeoutSeconds > cfg.Codex.MaxTimeoutSeconds {
+		timeoutSeconds = cfg.Codex.MaxTimeoutSeconds
+	}
+	if timeoutSeconds > 0 {
+		timeout = time.Duration(timeoutSeconds) * time.Second
 	}
 
 	var noOutput time.Duration
+	noOutputSeconds := 0
+	if cfg != nil {
+		noOutputSeconds = cfg.Codex.DefaultNoOutputTimeoutSeconds
+	}
 	if input.NoOutputSeconds != nil && *input.NoOutputSeconds > 0 {
-		noOutput = time.Duration(*input.NoOutputSeconds) * time.Second
-	} // nil or <=0 keeps default (disabled)
+		noOutputSeconds = *input.NoOutputSeconds
+	}
+	if noOutputSeconds > 0 {
+		noOutput = time.Duration(noOutputSeconds) * time.Second
+	}
 
 	// Validate image files exist
 	for _, imgPath := range input.Image {
@@ -279,6 +324,8 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		Profile:           input.Profile,
 		Timeout:           timeout,
 		NoOutputTimeout:   noOutput,
+		ExecutablePath:    cfg.Codex.ExecutablePath,
+		MaxBufferedLines:  cfg.Codex.MaxBufferedLines,
 	}
 
 	// Execute codex
@@ -336,7 +383,7 @@ func handleStats(ctx context.Context, req *mcp.CallToolRequest, input StatsInput
 }
 
 // Run starts the MCP server over stdio transport.
-func Run(ctx context.Context) error {
-	server := NewServer()
+func Run(ctx context.Context, cfg *config.Config) error {
+	server := NewServer(cfg)
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

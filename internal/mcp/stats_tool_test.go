@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/w31r4/codex-mcp-go/internal/config"
 )
 
 func TestStatsTool_AppearsInToolsList(t *testing.T) {
 	ctx := context.Background()
 
-	s := NewServer()
+	s := NewServer(config.Default())
 	c := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "client", Version: "test"}, nil)
 
 	t1, t2 := mcpsdk.NewInMemoryTransports()

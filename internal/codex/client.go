@@ -54,6 +54,8 @@ type Options struct {
 	Profile           string
 	Timeout           time.Duration
 	NoOutputTimeout   time.Duration
+	ExecutablePath    string
+	MaxBufferedLines  int
 }
 
 // Result represents the parsed result from Codex CLI output
@@ -95,9 +97,13 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return nil, cerrors.ErrInvalidSandboxMode(sandbox, ValidSandboxModes)
 	}
 
-	codexPath, lookErr := exec.LookPath("codex")
-	if lookErr != nil {
-		return nil, cerrors.ErrCodexNotFound(lookErr)
+	codexPath := strings.TrimSpace(opts.ExecutablePath)
+	if codexPath == "" {
+		lookPath, lookErr := exec.LookPath("codex")
+		if lookErr != nil {
+			return nil, cerrors.ErrCodexNotFound(lookErr)
+		}
+		codexPath = lookPath
 	}
 
 	// Build the base command
@@ -150,6 +156,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	agentMessages := make([]string, 0)
 	recentLines := make([]string, 0)
+	bufferLimit := maxBufferedOutputLines
+	if opts.MaxBufferedLines > 0 {
+		bufferLimit = opts.MaxBufferedLines
+	}
 
 	lineCh := make(chan []byte)
 	readErrCh := make(chan error, 1)
@@ -213,7 +223,7 @@ drainLoop:
 			}
 
 			recentLines = append(recentLines, string(trimmed))
-			if len(recentLines) > maxBufferedOutputLines {
+			if len(recentLines) > bufferLimit {
 				recentLines = recentLines[1:]
 			}
 

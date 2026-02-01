@@ -206,7 +206,7 @@ Edge Cases & Best Practices:
 		InputSchema: buildInputSchema(),
 		OutputSchema: buildOutputSchema(),
 		Meta: mcp.Meta{
-			"version": "0.0.9",
+			"version": "0.1.0",
 			"author":  "guda.studio",
 		},
 	}

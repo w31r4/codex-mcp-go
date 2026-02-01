@@ -26,6 +26,7 @@ const (
 	ParameterProhibited  Code = -32008
 	SessionNotFound      Code = -32009
 	NoOutputTimeout      Code = -32010
+	SessionLimitExceeded Code = -32011
 )
 
 // Name returns a stable string identifier for the code.
@@ -61,6 +62,8 @@ func (c Code) Name() string {
 		return "SessionNotFound"
 	case NoOutputTimeout:
 		return "NoOutputTimeout"
+	case SessionLimitExceeded:
+		return "SessionLimitExceeded"
 	default:
 		return "UnknownError"
 	}

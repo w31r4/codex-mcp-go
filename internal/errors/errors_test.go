@@ -26,6 +26,7 @@ func TestCodeName(t *testing.T) {
 		{ParameterProhibited, "ParameterProhibited"},
 		{SessionNotFound, "SessionNotFound"},
 		{NoOutputTimeout, "NoOutputTimeout"},
+		{SessionLimitExceeded, "SessionLimitExceeded"},
 		{Code(0), "UnknownError"},
 		{Code(-999999), "UnknownError"},
 	}

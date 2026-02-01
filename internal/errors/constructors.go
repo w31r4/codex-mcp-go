@@ -74,3 +74,14 @@ func ErrParameterProhibited(param string, reason string) *Error {
 		WithData("parameter", param).
 		WithData("reason", reason)
 }
+
+func ErrSessionNotFound(sessionID string) *Error {
+	return New(SessionNotFound, "session not found").
+		WithData("SESSION_ID", sessionID)
+}
+
+func ErrSessionLimitExceeded(maxRunning int, running int) *Error {
+	return New(SessionLimitExceeded, "too many concurrent sessions").
+		WithData("max_running", maxRunning).
+		WithData("running", running)
+}

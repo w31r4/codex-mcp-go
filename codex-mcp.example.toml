@@ -1,0 +1,48 @@
+# Codex MCP Go configuration example (TOML)
+#
+# Precedence:
+# - defaults < this file < environment variables
+#
+# Start with:
+#   ./codex-mcp-go --config ./codex-mcp.example.toml
+# or:
+#   CODEX_MCP_CONFIG=./codex-mcp.example.toml ./codex-mcp-go
+
+[server]
+name = "Codex MCP Server-from guda.studio"
+version = "0.0.9"
+
+[codex]
+# Timeouts are in seconds.
+default_timeout_seconds = 1800
+max_timeout_seconds = 1800
+default_no_output_timeout_seconds = 0
+
+# Buffered JSONL lines kept for diagnostics.
+max_buffered_lines = 100
+
+# Optional path to codex executable (default: resolve from PATH).
+executable_path = ""
+
+[security]
+# Allowlist for model/profile. Empty list means "deny all".
+# Use ["*"] to allow any value.
+allowed_models = []
+allowed_profiles = []
+
+default_sandbox = "read-only"
+allowed_sandbox_modes = ["read-only", "workspace-write", "danger-full-access"]
+
+# Optional: restrict which working directories can be used for `cd`.
+# Empty list means "allow all".
+allowed_work_dirs = []
+
+# If true, reject `yolo=true`.
+disable_yolo = false
+
+[logging]
+level = "info"
+format = "json"
+output = "stderr"
+file_path = ""
+

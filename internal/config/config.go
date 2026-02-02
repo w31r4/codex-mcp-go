@@ -50,7 +50,7 @@ func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
 			Name:    "Codex MCP Server-from guda.studio",
-			Version: "0.2.0",
+			Version: "0.2.1",
 		},
 		Codex: CodexConfig{
 			DefaultTimeoutSeconds:         1800,

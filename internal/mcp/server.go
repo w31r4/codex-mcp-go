@@ -244,7 +244,7 @@ func NewServer(cfg *config.Config) *mcp.Server {
 	codexDestructive := true
 	codexOpenWorld := true
 	tool := &mcp.Tool{
-		Name: "codex",
+		Name:  "codex",
 		Title: "Codex",
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint:    false,
@@ -268,10 +268,10 @@ Edge Cases & Best Practices:
 - Defaults to "read-only" sandbox. Valid sandbox values: read-only, workspace-write, danger-full-access.
 - Disables "yolo" (auto-confirmation) by default; enable write/yolo explicitly if your workflow requires it.
 - If needed, set 'return_all_messages' to True to parse "all_messages" for detailed tracing (e.g., reasoning, tool calls, etc.).`,
-		InputSchema: buildInputSchema(),
+		InputSchema:  buildInputSchema(),
 		OutputSchema: buildOutputSchema(),
 		Meta: mcp.Meta{
-			"version": "0.2.0",
+			"version": "0.2.1",
 			"author":  "guda.studio",
 		},
 	}

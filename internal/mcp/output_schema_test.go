@@ -64,6 +64,7 @@ func TestCodexTool_OutputSchemaShape(t *testing.T) {
 		"all_messages",
 		"execution_time_ms",
 		"tool_call_count",
+		"change_receipt",
 	}
 	for _, key := range wantFields {
 		if _, ok := props[key]; !ok {
@@ -100,8 +101,8 @@ func TestCodexTool_Call_ReturnsStructuredContentAndTextContent(t *testing.T) {
 	out, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name: "codex",
 		Arguments: map[string]any{
-			"PROMPT":             "hi",
-			"cd":                 workdir,
+			"PROMPT":              "hi",
+			"cd":                  workdir,
 			"return_all_messages": true,
 		},
 	})

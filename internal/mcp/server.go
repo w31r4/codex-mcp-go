@@ -14,6 +14,7 @@ import (
 	"github.com/w31r4/codex-mcp-go/internal/logging"
 	"github.com/w31r4/codex-mcp-go/internal/metrics"
 	"github.com/w31r4/codex-mcp-go/internal/progress"
+	"github.com/w31r4/codex-mcp-go/internal/receipt"
 	"github.com/w31r4/codex-mcp-go/internal/session"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -33,6 +34,7 @@ type CodexInput struct {
 	SessionID         string   `json:"SESSION_ID,omitempty" jsonschema:"Resume the specified session of the codex. Defaults to None, start a new session."`
 	SkipGitRepoCheck  *bool    `json:"skip_git_repo_check,omitempty" jsonschema:"Allow codex running outside a Git repository (useful for one-off directories)."`
 	ReturnAllMessages bool     `json:"return_all_messages,omitempty" jsonschema:"Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned."`
+	ReturnDiff        bool     `json:"return_diff,omitempty" jsonschema:"Include a truncated 'git diff' in the change receipt (best-effort). Defaults to false."`
 	Image             []string `json:"image,omitempty" jsonschema:"Attach one or more image files to the initial prompt. Separate multiple paths with commas or repeat the flag."`
 	Model             string   `json:"model,omitempty" jsonschema:"The model to use for the codex session. This parameter is restricted by server allowlist (disabled by default)."`
 	Yolo              *bool    `json:"yolo,omitempty" jsonschema:"Run every command without approvals or sandboxing. Defaults to false to avoid unsafe execution."`
@@ -49,6 +51,7 @@ type CodexOutput struct {
 	AllMessages     []map[string]interface{} `json:"all_messages,omitempty"`
 	ExecutionTimeMs int64                    `json:"execution_time_ms"`
 	ToolCallCount   int                      `json:"tool_call_count"`
+	ChangeReceipt   receipt.ChangeReceipt    `json:"change_receipt"`
 }
 
 type StatsInput struct{}
@@ -89,6 +92,10 @@ func buildInputSchema() *jsonschema.Schema {
 			"return_all_messages": {
 				Type:        "boolean",
 				Description: "Return all messages (e.g. reasoning, tool calls, etc.) from the codex session. Set to False by default, only the agent's final reply message is returned.",
+			},
+			"return_diff": {
+				Type:        "boolean",
+				Description: "Include a truncated 'git diff' in the change receipt (best-effort). Defaults to false.",
 			},
 			"image": {
 				Type:        "array",
@@ -148,6 +155,63 @@ func buildOutputSchema() *jsonschema.Schema {
 			"tool_call_count": {
 				Type:        "number",
 				Description: "Best-effort count of tool calls observed in Codex JSONL output.",
+			},
+			"change_receipt": {
+				Type:        "object",
+				Description: "Best-effort Git change receipt for the working directory. Available only when cd is inside a Git repository and git is installed.",
+				Properties: map[string]*jsonschema.Schema{
+					"receipt_available": {
+						Type:        "boolean",
+						Description: "Whether a change receipt was successfully collected.",
+					},
+					"git_root": {
+						Type:        "string",
+						Description: "Git repository root path for cd.",
+					},
+					"git_status": {
+						Type:        "string",
+						Description: "Raw output of `git status --porcelain=v1` (best-effort).",
+					},
+					"diff_stat": {
+						Type:        "string",
+						Description: "Raw output of `git diff --stat` (best-effort).",
+					},
+					"changed_files": {
+						Type:        "array",
+						Description: "Parsed file changes from porcelain output.",
+						Items: &jsonschema.Schema{
+							Type: "object",
+							Properties: map[string]*jsonschema.Schema{
+								"path": {
+									Type:        "string",
+									Description: "File path relative to git root.",
+								},
+								"index_status": {
+									Type:        "string",
+									Description: "Index status (porcelain column X).",
+								},
+								"worktree_status": {
+									Type:        "string",
+									Description: "Worktree status (porcelain column Y).",
+								},
+							},
+							Required: []string{"path"},
+						},
+					},
+					"diff": {
+						Type:        "string",
+						Description: "Truncated `git diff` output; present only when return_diff=true.",
+					},
+					"diff_truncated": {
+						Type:        "boolean",
+						Description: "Whether the diff output was truncated due to size limits.",
+					},
+					"receipt_error": {
+						Type:        "string",
+						Description: "Best-effort diagnostic string when receipt collection fails; does not fail the parent tool call.",
+					},
+				},
+				Required: []string{"receipt_available"},
 			},
 		},
 		Required: []string{"success", "SESSION_ID", "agent_messages"},
@@ -474,6 +538,11 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 
 	globalSessions.MarkCompleted(trackingID, runDuration.Milliseconds(), codexResult.ToolCallCount)
 
+	// Best-effort: collect a post-run change receipt for local review.
+	changeReceipt := receipt.Collect(ctx, input.Cd, receipt.CollectOptions{
+		ReturnDiff: input.ReturnDiff,
+	})
+
 	// Prepare the response
 	out = CodexOutput{
 		Success:         true,
@@ -481,6 +550,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		AgentMessages:   codexResult.AgentMessages,
 		ExecutionTimeMs: runDuration.Milliseconds(),
 		ToolCallCount:   codexResult.ToolCallCount,
+		ChangeReceipt:   changeReceipt,
 	}
 
 	if input.ReturnAllMessages {

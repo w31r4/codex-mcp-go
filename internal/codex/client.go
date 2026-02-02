@@ -58,6 +58,11 @@ type Options struct {
 	ExecutablePath    string
 	MaxBufferedLines  int
 	Reporter          progress.Reporter
+
+	// OnRawLine receives each trimmed stdout/stderr line from Codex (best-effort).
+	OnRawLine func(line []byte)
+	// OnThreadID is called when a thread_id is observed (best-effort).
+	OnThreadID func(threadID string)
 }
 
 // Result represents the parsed result from Codex CLI output
@@ -116,6 +121,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	// Build the base command
 	cmd := exec.CommandContext(ctx, codexPath, "exec", "--sandbox", sandbox, "--cd", opts.WorkingDir, "--json")
+	configureProcess(cmd)
 	reporter.Report(ctx, "starting codex")
 
 	// Add optional flags
@@ -241,6 +247,10 @@ drainLoop:
 				continue
 			}
 
+			if opts.OnRawLine != nil {
+				safeCallBytes(opts.OnRawLine, trimmed)
+			}
+
 			if !reportedFirstOutput {
 				reportedFirstOutput = true
 				reporter.Report(ctx, "received output")
@@ -285,6 +295,9 @@ drainLoop:
 				if !reportedThreadID {
 					reportedThreadID = true
 					reporter.Report(ctx, "received SESSION_ID")
+					if opts.OnThreadID != nil {
+						safeCallString(opts.OnThreadID, threadID)
+					}
 				}
 			}
 
@@ -344,9 +357,7 @@ drainLoop:
 				runErr = cerrors.ErrNoOutputTimeout(opts.NoOutputTimeout).
 					WithData("last_output_at", lastOutput.Format(time.RFC3339))
 			}
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
+			killProcessTree(cmd)
 			break drainLoop
 		case <-ctx.Done():
 			result.Success = false
@@ -360,9 +371,7 @@ drainLoop:
 					runErr = cerrors.ErrCodexExecutionFailed(result.Error, ctx.Err())
 				}
 			}
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
+			killProcessTree(cmd)
 			break drainLoop
 		case <-func() <-chan time.Time {
 			if progressTicker == nil {
@@ -437,4 +446,14 @@ func escapePrompt(prompt string) string {
 		"'", "\\'",
 	)
 	return replacer.Replace(prompt)
+}
+
+func safeCallBytes(fn func([]byte), b []byte) {
+	defer func() { _ = recover() }()
+	fn(b)
+}
+
+func safeCallString(fn func(string), s string) {
+	defer func() { _ = recover() }()
+	fn(s)
 }

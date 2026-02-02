@@ -27,8 +27,8 @@ type GetSessionInput struct {
 }
 
 type GetSessionOutput struct {
-	Found   bool         `json:"found"`
-	Session session.View `json:"session,omitempty"`
+	Found   bool               `json:"found"`
+	Session session.DetailView `json:"session,omitempty"`
 }
 
 type CancelSessionInput struct {
@@ -106,7 +106,7 @@ func handleGetSession(ctx context.Context, req *mcp.CallToolRequest, input GetSe
 		return nil, GetSessionOutput{}, cerrors.ErrInvalidParams("SESSION_ID is required")
 	}
 
-	s, ok := globalSessions.Get(input.SessionID)
+	s, ok := globalSessions.GetDetail(input.SessionID, 20)
 	output.Found = ok
 	if ok {
 		output.Session = s
@@ -145,4 +145,3 @@ func handleCancelSession(ctx context.Context, req *mcp.CallToolRequest, input Ca
 	}
 	return nil, output, nil
 }
-

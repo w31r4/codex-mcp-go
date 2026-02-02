@@ -11,6 +11,7 @@ import (
 	"time"
 
 	cerrors "github.com/w31r4/codex-mcp-go/internal/errors"
+	"github.com/w31r4/codex-mcp-go/internal/receipt"
 )
 
 type State string
@@ -25,12 +26,17 @@ const (
 type Options struct {
 	MaxRunning int
 	TTL        time.Duration
+
+	DiagnosticsMaxEntries    int
+	DiagnosticsMaxEntryBytes int
 }
 
 func DefaultOptions() Options {
 	return Options{
-		MaxRunning: 4,
-		TTL:        time.Hour,
+		MaxRunning:               4,
+		TTL:                      time.Hour,
+		DiagnosticsMaxEntries:    200,
+		DiagnosticsMaxEntryBytes: 2048,
 	}
 }
 
@@ -49,6 +55,13 @@ type Record struct {
 	Error string
 
 	cancel context.CancelFunc
+
+	ChangeReceipt *receipt.ChangeReceipt
+
+	diagNextSeq  uint64
+	diagnostics  []DiagnosticEntry
+	lastEventAt  *time.Time
+	lastOutputAt *time.Time
 }
 
 type View struct {
@@ -70,19 +83,50 @@ func (r *Record) View() View {
 		return View{}
 	}
 	v := View{
-		SessionID:        r.ID,
-		State:            r.State,
-		WorkDir:          r.WorkDir,
-		Sandbox:          r.Sandbox,
-		StartedAt:        r.StartedAt.UTC().Format(time.RFC3339),
-		ExecutionTimeMs:  r.ExecutionTimeMs,
-		ToolCallCount:    r.ToolCallCount,
-		Error:            r.Error,
+		SessionID:       r.ID,
+		State:           r.State,
+		WorkDir:         r.WorkDir,
+		Sandbox:         r.Sandbox,
+		StartedAt:       r.StartedAt.UTC().Format(time.RFC3339),
+		ExecutionTimeMs: r.ExecutionTimeMs,
+		ToolCallCount:   r.ToolCallCount,
+		Error:           r.Error,
 	}
 	if r.EndedAt != nil {
 		v.EndedAt = r.EndedAt.UTC().Format(time.RFC3339)
 	}
 	return v
+}
+
+type DetailView struct {
+	View
+
+	LastEventAt   string                 `json:"last_event_at,omitempty"`
+	LastOutputAt  string                 `json:"last_output_at,omitempty"`
+	Recent        []DiagnosticEntryView  `json:"recent_entries,omitempty"`
+	ChangeReceipt *receipt.ChangeReceipt `json:"change_receipt,omitempty"`
+}
+
+func (r *Record) DetailView(limit int) DetailView {
+	if r == nil {
+		return DetailView{}
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	entries := recentViews(r.diagnostics, limit)
+	dv := DetailView{
+		View:          r.View(),
+		Recent:        entries,
+		ChangeReceipt: r.ChangeReceipt,
+	}
+	if r.lastEventAt != nil {
+		dv.LastEventAt = r.lastEventAt.UTC().Format(time.RFC3339)
+	}
+	if r.lastOutputAt != nil {
+		dv.LastOutputAt = r.lastOutputAt.UTC().Format(time.RFC3339)
+	}
+	return dv
 }
 
 type Manager struct {
@@ -97,6 +141,12 @@ func NewManager(opts Options) *Manager {
 	}
 	if opts.TTL == 0 {
 		opts.TTL = DefaultOptions().TTL
+	}
+	if opts.DiagnosticsMaxEntries == 0 {
+		opts.DiagnosticsMaxEntries = DefaultOptions().DiagnosticsMaxEntries
+	}
+	if opts.DiagnosticsMaxEntryBytes == 0 {
+		opts.DiagnosticsMaxEntryBytes = DefaultOptions().DiagnosticsMaxEntryBytes
 	}
 	return &Manager{
 		opts:     opts,
@@ -193,6 +243,127 @@ func (m *Manager) MarkFailed(sessionID string, err error) bool {
 
 func (m *Manager) MarkCancelled(sessionID string, reason string) bool {
 	return m.finish(sessionID, StateCancelled, reason, 0, 0)
+}
+
+func (m *Manager) SetChangeReceipt(sessionID string, receipt receipt.ChangeReceipt) bool {
+	sessionID = stringsTrim(sessionID)
+	if sessionID == "" {
+		return false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	rec, ok := m.sessions[sessionID]
+	if !ok {
+		return false
+	}
+	r := receipt
+	rec.ChangeReceipt = &r
+	return true
+}
+
+func (m *Manager) AppendDiagnostic(sessionID string, kind DiagnosticKind, message string) bool {
+	sessionID = stringsTrim(sessionID)
+	if sessionID == "" {
+		return false
+	}
+
+	now := time.Now()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	rec, ok := m.sessions[sessionID]
+	if !ok {
+		return false
+	}
+
+	rec.diagNextSeq++
+	entry := DiagnosticEntry{
+		Seq:     rec.diagNextSeq,
+		At:      now,
+		Kind:    kind,
+		Message: truncate(message, m.opts.DiagnosticsMaxEntryBytes),
+	}
+	rec.diagnostics = append(rec.diagnostics, entry)
+	if max := m.opts.DiagnosticsMaxEntries; max > 0 && len(rec.diagnostics) > max {
+		rec.diagnostics = rec.diagnostics[len(rec.diagnostics)-max:]
+	}
+	rec.lastEventAt = &now
+	if kind == DiagnosticOutput {
+		rec.lastOutputAt = &now
+	}
+	return true
+}
+
+func (m *Manager) TailDiagnostics(sessionID string, cursor uint64, limit int) (entries []DiagnosticEntryView, nextCursor uint64, dropped bool, droppedBefore uint64, state State, found bool) {
+	sessionID = stringsTrim(sessionID)
+	if sessionID == "" {
+		return nil, cursor, false, 0, "", false
+	}
+
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	rec, ok := m.sessions[sessionID]
+	if !ok {
+		return nil, cursor, false, 0, "", false
+	}
+	state = rec.State
+	found = true
+
+	if len(rec.diagnostics) == 0 {
+		return nil, cursor, false, 0, state, true
+	}
+
+	oldest := rec.diagnostics[0].Seq
+	if cursor != 0 && cursor < oldest {
+		dropped = true
+		droppedBefore = oldest
+		// Reset cursor so the client can resume from what we still have.
+		cursor = oldest - 1
+	}
+
+	entries = make([]DiagnosticEntryView, 0, limit)
+	for _, e := range rec.diagnostics {
+		if e.Seq <= cursor {
+			continue
+		}
+		entries = append(entries, e.View())
+		if len(entries) >= limit {
+			break
+		}
+	}
+
+	nextCursor = cursor
+	if len(entries) > 0 {
+		nextCursor = entries[len(entries)-1].Seq
+	}
+	return entries, nextCursor, dropped, droppedBefore, state, true
+}
+
+func (m *Manager) GetDetail(sessionID string, recentLimit int) (DetailView, bool) {
+	sessionID = stringsTrim(sessionID)
+	if sessionID == "" {
+		return DetailView{}, false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	rec, ok := m.sessions[sessionID]
+	if !ok {
+		return DetailView{}, false
+	}
+	return rec.DetailView(recentLimit), true
 }
 
 func (m *Manager) Cancel(sessionID string) (bool, error) {

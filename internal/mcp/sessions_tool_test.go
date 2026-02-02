@@ -37,6 +37,7 @@ func TestSessionTools_AppearInToolsList(t *testing.T) {
 	var (
 		foundList   bool
 		foundGet    bool
+		foundTail   bool
 		foundCancel bool
 	)
 	for _, tool := range res.Tools {
@@ -51,6 +52,11 @@ func TestSessionTools_AppearInToolsList(t *testing.T) {
 			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
 				t.Fatalf("get_session should be read-only")
 			}
+		case "tail_session":
+			foundTail = true
+			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+				t.Fatalf("tail_session should be read-only")
+			}
 		case "cancel_session":
 			foundCancel = true
 			if tool.Annotations == nil {
@@ -64,8 +70,8 @@ func TestSessionTools_AppearInToolsList(t *testing.T) {
 			}
 		}
 	}
-	if !foundList || !foundGet || !foundCancel {
-		t.Fatalf("missing tools: list=%v get=%v cancel=%v", foundList, foundGet, foundCancel)
+	if !foundList || !foundGet || !foundTail || !foundCancel {
+		t.Fatalf("missing tools: list=%v get=%v tail=%v cancel=%v", foundList, foundGet, foundTail, foundCancel)
 	}
 }
 
@@ -291,4 +297,3 @@ func TestCancelSession_CancelsRunningSession(t *testing.T) {
 		t.Fatalf("codex tool call did not return after cancellation")
 	}
 }
-

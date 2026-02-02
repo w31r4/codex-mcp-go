@@ -309,6 +309,16 @@ Edge Cases & Best Practices:
 		},
 	}, handleGetSession)
 
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "tail_session",
+		Title:       "Tail Session",
+		Description: "Returns recent session diagnostic entries for the given SESSION_ID.",
+		InputSchema: buildTailSessionInputSchema(),
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint: true,
+		},
+	}, handleTailSession)
+
 	destructive := true
 	openWorld := false
 	mcp.AddTool(s, &mcp.Tool{
@@ -518,17 +528,52 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		return nil, CodexOutput{}, startErr
 	}
 
+	// Record best-effort diagnostics for local debugging and post-timeout inspection.
+	getSessionID := func() string { return trackingID }
+	globalSessions.AppendDiagnostic(trackingID, session.DiagnosticSystem, "session started")
+	globalSessions.AppendDiagnostic(trackingID, session.DiagnosticSystem, "workdir lock acquired")
+	opts.Reporter = diagnosticsReporter{
+		next:         reporter,
+		getSessionID: getSessionID,
+	}
+	opts.OnRawLine = func(line []byte) {
+		id := strings.TrimSpace(getSessionID())
+		if id == "" {
+			return
+		}
+		globalSessions.AppendDiagnostic(id, session.DiagnosticOutput, string(line))
+	}
+	opts.OnThreadID = func(threadID string) {
+		threadID = strings.TrimSpace(threadID)
+		if threadID == "" {
+			return
+		}
+		// For new sessions, switch from temporary id to the real thread id as soon as we observe it.
+		if input.SessionID != "" || threadID == trackingID {
+			return
+		}
+		if ok, updateErr := globalSessions.UpdateID(trackingID, threadID); updateErr == nil && ok {
+			trackingID = threadID
+			globalSessions.AppendDiagnostic(trackingID, session.DiagnosticSystem, "received SESSION_ID")
+		}
+	}
+
 	// Execute codex
 	runStart := time.Now()
 	codexResult, runErr := codex.Run(runCtx, opts)
 	runDuration := time.Since(runStart)
 	if runErr != nil {
+		// Best-effort: collect a change receipt even on failure/cancellation so users can inspect what changed.
+		failureReceipt := receipt.Collect(context.Background(), input.Cd, receipt.CollectOptions{
+			ReturnDiff: input.ReturnDiff,
+		})
 		// Best-effort: if this was a new session, update the temporary tracking ID to the real thread_id when known.
 		if input.SessionID == "" && codexResult != nil && strings.TrimSpace(codexResult.SessionID) != "" && codexResult.SessionID != trackingID {
 			if ok, updateErr := globalSessions.UpdateID(trackingID, codexResult.SessionID); updateErr == nil && ok {
 				trackingID = codexResult.SessionID
 			}
 		}
+		_ = globalSessions.SetChangeReceipt(trackingID, failureReceipt)
 		if errors.Is(runCtx.Err(), context.Canceled) {
 			globalSessions.MarkCancelled(trackingID, "cancelled")
 		} else {
@@ -554,6 +599,10 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 		if msg == "" {
 			msg = "codex execution failed"
 		}
+		failureReceipt := receipt.Collect(context.Background(), input.Cd, receipt.CollectOptions{
+			ReturnDiff: input.ReturnDiff,
+		})
+		_ = globalSessions.SetChangeReceipt(trackingID, failureReceipt)
 		errOut := cerrors.New(cerrors.CodexExecutionFailed, msg)
 		globalSessions.MarkFailed(trackingID, errOut)
 		return nil, CodexOutput{}, errOut
@@ -565,6 +614,7 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	changeReceipt := receipt.Collect(ctx, input.Cd, receipt.CollectOptions{
 		ReturnDiff: input.ReturnDiff,
 	})
+	_ = globalSessions.SetChangeReceipt(trackingID, changeReceipt)
 
 	// Prepare the response
 	out = CodexOutput{

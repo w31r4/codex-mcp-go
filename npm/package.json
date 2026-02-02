@@ -1,6 +1,6 @@
 {
   "name": "@zenfun510/codex-mcp-go",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "mcpName": "io.github.w31r4/codex-mcp-go",
   "description": "NPM wrapper for codex-mcp-go",
   "bin": {

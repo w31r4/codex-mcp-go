@@ -29,6 +29,12 @@ type CodexConfig struct {
 
 	MaxBufferedLines int    `toml:"max_buffered_lines"`
 	ExecutablePath   string `toml:"executable_path"`
+
+	// WorkdirLockMode controls concurrency for the same repository/workdir key.
+	// Valid values: "reject" (fail fast), "queue" (wait).
+	WorkdirLockMode string `toml:"workdir_lock_mode"`
+	// WorkdirLockTimeoutSeconds bounds waiting in queue mode (0 = wait until ctx cancel/timeout).
+	WorkdirLockTimeoutSeconds int `toml:"workdir_lock_timeout_seconds"`
 }
 
 type SecurityConfig struct {
@@ -52,6 +58,8 @@ func Default() *Config {
 			DefaultNoOutputTimeoutSeconds: 0,
 			MaxBufferedLines:              100,
 			ExecutablePath:                "",
+			WorkdirLockMode:               "reject",
+			WorkdirLockTimeoutSeconds:     0,
 		},
 		Security: SecurityConfig{
 			AllowedModels:       nil, // deny all by default
@@ -88,6 +96,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Codex.MaxBufferedLines < 0 {
 		return fmt.Errorf("codex.max_buffered_lines must be >= 0")
+	}
+	if strings.TrimSpace(c.Codex.WorkdirLockMode) == "" {
+		c.Codex.WorkdirLockMode = "reject"
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Codex.WorkdirLockMode)) {
+	case "reject", "queue":
+		// ok
+	default:
+		return fmt.Errorf("codex.workdir_lock_mode must be one of [reject queue]")
+	}
+	if c.Codex.WorkdirLockTimeoutSeconds < 0 {
+		return fmt.Errorf("codex.workdir_lock_timeout_seconds must be >= 0")
 	}
 
 	if c.Security.DefaultSandbox == "" {

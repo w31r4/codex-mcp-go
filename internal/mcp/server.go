@@ -24,6 +24,7 @@ var (
 	serverStartTime = time.Now()
 	globalMetrics   = metrics.New()
 	globalConfig    = config.Default()
+	globalWorkLocks = newWorkdirLockManager()
 )
 
 // CodexInput represents the input parameters for the codex tool
@@ -386,6 +387,28 @@ func handleCodexTool(ctx context.Context, req *mcp.CallToolRequest, input CodexI
 	if !info.IsDir() {
 		return nil, CodexOutput{}, cerrors.ErrWorkdirNotDirectory(input.Cd)
 	}
+
+	// Enforce per-workdir exclusivity to avoid concurrent writes in the same repo/workspace.
+	lockKey := workdirKey(ctx, input.Cd)
+	lockMode := workdirLockMode("reject")
+	lockTimeout := time.Duration(0)
+	if cfg != nil {
+		lockMode = workdirLockMode(strings.ToLower(strings.TrimSpace(cfg.Codex.WorkdirLockMode)))
+		if cfg.Codex.WorkdirLockTimeoutSeconds > 0 {
+			lockTimeout = time.Duration(cfg.Codex.WorkdirLockTimeoutSeconds) * time.Second
+		}
+	}
+	acquired, lockErr := globalWorkLocks.acquire(ctx, lockKey, lockMode, lockTimeout)
+	if lockErr != nil {
+		return nil, CodexOutput{}, cerrors.Wrap(cerrors.InternalError, "failed to acquire workdir lock", lockErr).
+			WithData("cd", input.Cd).
+			WithData("workdir_key", lockKey).
+			WithData("mode", string(lockMode))
+	}
+	if !acquired {
+		return nil, CodexOutput{}, cerrors.ErrWorkdirBusy(input.Cd, lockKey, string(lockMode))
+	}
+	defer globalWorkLocks.release(lockKey)
 
 	// Set defaults
 	if input.Sandbox == "" {

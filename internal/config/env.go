@@ -15,6 +15,8 @@ const (
 	envNoOutputTimeout  = "CODEX_NO_OUTPUT_TIMEOUT"
 	envMaxBufferedLines = "CODEX_MAX_BUFFERED_LINES"
 	envExecutablePath   = "CODEX_EXECUTABLE_PATH"
+	envWorkdirLockMode  = "CODEX_WORKDIR_LOCK_MODE"
+	envWorkdirLockWait  = "CODEX_WORKDIR_LOCK_TIMEOUT"
 
 	envAllowedModels       = "CODEX_ALLOWED_MODELS"
 	envAllowedProfiles     = "CODEX_ALLOWED_PROFILES"
@@ -55,6 +57,12 @@ func (c *Config) LoadFromEnv() {
 	}
 	if v := strings.TrimSpace(os.Getenv(envExecutablePath)); v != "" {
 		c.Codex.ExecutablePath = v
+	}
+	if v := strings.TrimSpace(os.Getenv(envWorkdirLockMode)); v != "" {
+		c.Codex.WorkdirLockMode = v
+	}
+	if v, ok := readIntEnv(envWorkdirLockWait); ok {
+		c.Codex.WorkdirLockTimeoutSeconds = v
 	}
 
 	if v, ok := readCSVEnv(envAllowedModels); ok {

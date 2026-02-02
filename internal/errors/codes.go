@@ -27,6 +27,7 @@ const (
 	SessionNotFound      Code = -32009
 	NoOutputTimeout      Code = -32010
 	SessionLimitExceeded Code = -32011
+	WorkdirBusy          Code = -32012
 )
 
 // Name returns a stable string identifier for the code.
@@ -64,6 +65,8 @@ func (c Code) Name() string {
 		return "NoOutputTimeout"
 	case SessionLimitExceeded:
 		return "SessionLimitExceeded"
+	case WorkdirBusy:
+		return "WorkdirBusy"
 	default:
 		return "UnknownError"
 	}

@@ -85,3 +85,10 @@ func ErrSessionLimitExceeded(maxRunning int, running int) *Error {
 		WithData("max_running", maxRunning).
 		WithData("running", running)
 }
+
+func ErrWorkdirBusy(cd string, workdirKey string, mode string) *Error {
+	return New(WorkdirBusy, "workdir is busy").
+		WithData("cd", cd).
+		WithData("workdir_key", workdirKey).
+		WithData("mode", mode)
+}

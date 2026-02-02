@@ -27,6 +27,7 @@ func TestCodeName(t *testing.T) {
 		{SessionNotFound, "SessionNotFound"},
 		{NoOutputTimeout, "NoOutputTimeout"},
 		{SessionLimitExceeded, "SessionLimitExceeded"},
+		{WorkdirBusy, "WorkdirBusy"},
 		{Code(0), "UnknownError"},
 		{Code(-999999), "UnknownError"},
 	}
